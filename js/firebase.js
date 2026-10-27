@@ -7,12 +7,12 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-aut
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 export const firebaseConfig = {
-    apiKey: "",
-    authDomain: "",
-    projectId: "",
-    storageBucket: "",
-    messagingSenderId: "",
-    appId: ""
+    apiKey: "AIzaSyDJ14wOLOqEjgdFwadfgFY8Qkpr-xbFY4c",
+    authDomain: "gvq-ordens-de-compra.firebaseapp.com",
+    projectId: "gvq-ordens-de-compra",
+    storageBucket: "gvq-ordens-de-compra.firebasestorage.app",
+    messagingSenderId: "688772374465",
+    appId: "1:688772374465:web:c85feda3999add19585940"
 };
 
 export const configurado = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
