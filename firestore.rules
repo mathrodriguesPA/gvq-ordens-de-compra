@@ -111,6 +111,15 @@ service cloud.firestore {
         && request.resource.data.geradaPor == meuLogin() && request.resource.data.geradaEm == request.time
         && getAfter(caminho('solicitacoes', request.resource.data.solicitacaoId)).data.ocNumero == request.resource.data.numero;
 
+      // Carga das OCs da planilha antiga (aba Cadastros): só números anteriores ao contador.
+      allow create: if analista() && request.resource.data.fonte == 'planilha'
+        && request.resource.data.keys().hasOnly(['fonte', 'numero', 'rotulo', 'status', 'tipo', 'sexo', 'raca', 'quantidade', 'origens',
+          'destino', 'proprietario', 'dataPrevista', 'trava', 'alerta', 'importadaPor', 'importadaEm'])
+        && request.resource.data.numero is int && request.resource.data.numero < get(caminho('config', 'contador')).data.proxima
+        && request.resource.data.status in ['Pendente', 'Aberto', 'Finalizado', 'Cancelado']
+        && request.resource.data.origens is list && request.resource.data.origens.size() <= 50
+        && request.resource.data.importadaPor == meuLogin() && request.resource.data.importadaEm == request.time;
+
       allow update: if analista()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusAtualizadoPor', 'statusAtualizadoPorNome', 'statusAtualizadoEm'])
         && request.resource.data.status in ['Pendente', 'Aberto', 'Finalizado', 'Cancelado']

@@ -1,9 +1,10 @@
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-    collection, doc, getDoc, onSnapshot, query, where, addDoc, updateDoc, setDoc, runTransaction, serverTimestamp
+    collection, doc, getDoc, onSnapshot, query, where, addDoc, updateDoc, setDoc, runTransaction, writeBatch, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { auth, db } from "./firebase.js";
-import { TIPOS, SEXOS, PROPRIETARIOS, TRAVAS, STATUS_OC, LISTAS_PADRAO, NOMES_LISTAS, SITUACOES, CLASSE_STATUS_OC } from "./listas.js";
+import { TIPOS, SEXOS, PROPRIETARIOS, TRAVAS, STATUS_OC, LISTAS_PADRAO, NOMES_LISTAS, SITUACOES, CLASSE_STATUS_OC, DESCRICAO_STATUS_OC } from "./listas.js";
+import { lerArquivosPlanilha } from "./importar.js";
 import { escapar, formatarData, formatarNumero, formatarPreco, lerNumero, hojeIso, compararNomes, contemTermos } from "./util.js";
 
 const $ = id => document.getElementById(id);
@@ -141,7 +142,9 @@ function atualizarListas() {
     const ordenar = l => [...l].sort(compararNomes);
     preencherSelect($('f-raca'), ordenar(estado.listas.racas));
     preencherSelect($('f-responsavel'), ordenar(estado.listas.responsaveis));
-    $('lista-origens').innerHTML = ordenar(estado.listas.origens).map(i => `<option value="${escapar(i)}">`).join('');
+    // Origem pode ser fornecedor, outra fazenda ou uma das fazendas de destino (transferência).
+    const origens = [...new Set([...estado.listas.origens, ...estado.listas.fazendas])];
+    $('lista-origens').innerHTML = ordenar(origens).map(i => `<option value="${escapar(i)}">`).join('');
     $('lista-fazendas').innerHTML = ordenar(estado.listas.fazendas).map(i => `<option value="${escapar(i)}">`).join('');
     if (ehAnalista()) renderCadastros();
 }
@@ -272,7 +275,7 @@ function renderMinhas() {
             <td>${escapar(s.origem)} → ${escapar(s.destino)}</td>
             <td>${tag(situacao.texto, situacao.classe)}${detalhe}</td>
             <td>${s.ocNumero ? `<strong>${s.ocNumero}</strong>` : '—'}</td>
-            <td>${oc ? tag(oc.status, CLASSE_STATUS_OC[oc.status]) : '—'}</td>
+            <td>${oc ? tag(oc.status, CLASSE_STATUS_OC[oc.status]) + `<span class="motivo">${escapar(DESCRICAO_STATUS_OC[oc.status] || '')}</span>` : '—'}</td>
             <td><div class="acoes-linha">${s.status === 'ajuste' ? `<button class="btn btn-primario btn-sm" data-corrigir="${s.id}">Corrigir</button>` : ''}</div></td>
         </tr>`;
     }).join('');
@@ -448,12 +451,15 @@ function montarOcs() {
 }
 
 const textoOrigens = oc => (oc.origens || []).map(o => o.origem).filter(Boolean).join(', ');
+// OCs da planilha podem ter número com letra ("1173 A"); o rótulo guarda como estava.
+const rotuloOc = oc => oc.rotulo || String(oc.numero);
+const dataOc = oc => oc.dataPrevista || oc.dataEmissao;
 function ocsFiltradas() {
     const busca = $('busca-ocs').value, status = $('filtro-status').value, tipo = $('filtro-tipo').value;
     return estado.ocs
         .filter(oc => (!status || oc.status === status) && (!tipo || oc.tipo === tipo)
-            && contemTermos([oc.numero, textoOrigens(oc), oc.destino, oc.responsavel, oc.solicitante, oc.raca, oc.sexo, oc.proprietario].join(' '), busca))
-        .sort((a, b) => b.numero - a.numero);
+            && contemTermos([rotuloOc(oc), textoOrigens(oc), oc.destino, oc.responsavel, oc.solicitante, oc.raca, oc.sexo, oc.proprietario].join(' '), busca))
+        .sort((a, b) => b.numero - a.numero || compararNomes(b.id, a.id));
 }
 
 function renderOcs() {
@@ -465,8 +471,8 @@ function renderOcs() {
     $('contagem-ocs').textContent = `${formatarNumero(lista.length)} de ${formatarNumero(estado.ocs.length)} OCs`;
     if (!lista.length) return vazio('tbody-ocs', 11, estado.ocs.length ? 'Nenhuma OC encontrada com esses filtros.' : 'Nenhuma OC cadastrada.');
     $('tbody-ocs').innerHTML = lista.map(oc => `<tr>
-        <td class="col-num"><strong>${oc.numero}</strong></td>
-        <td>${formatarData(oc.dataEmissao)}</td>
+        <td class="col-num"><strong>${escapar(rotuloOc(oc))}</strong>${oc.alerta ? ` <span class="tag tag-alerta" title="${escapar(oc.alerta)}">!</span>` : ''}</td>
+        <td>${formatarData(dataOc(oc))}</td>
         <td>${escapar(oc.tipo)}</td>
         <td>${escapar(oc.sexo)}${oc.raca ? ' · ' + escapar(oc.raca) : ''}</td>
         <td class="col-num">${formatarNumero(oc.quantidade)}</td>
@@ -475,29 +481,31 @@ function renderOcs() {
         <td>${escapar(oc.proprietario)}</td>
         <td>${escapar(oc.trava || '—')}</td>
         <td>${escapar(oc.responsavel)}</td>
-        <td><select class="select-status" data-oc="${escapar(oc.id)}" aria-label="Status da OC ${oc.numero}">
+        <td><select class="select-status" data-oc="${escapar(oc.id)}" title="${escapar(DESCRICAO_STATUS_OC[oc.status] || '')}" aria-label="Status da OC ${escapar(rotuloOc(oc))}">
             ${STATUS_OC.map(s => `<option${s === oc.status ? ' selected' : ''}>${s}</option>`).join('')}
         </select></td>
     </tr>`).join('');
     $('tbody-ocs').querySelectorAll('[data-oc]').forEach(sel => sel.onchange = async () => {
         const oc = estado.ocs.find(o => o.id === sel.dataset.oc);
-        if (!confirm(`Mudar a OC ${oc.numero} de ${oc.status} para ${sel.value}?`)) { sel.value = oc.status; return; }
+        if (!confirm(`Mudar a OC ${rotuloOc(oc)} de ${oc.status} para ${sel.value}?\n\n${sel.value}: ${DESCRICAO_STATUS_OC[sel.value]}`)) { sel.value = oc.status; return; }
         try {
             await updateDoc(doc(db, 'ocs', oc.id), { status: sel.value, statusAtualizadoPor: estado.usuario.login, statusAtualizadoPorNome: estado.usuario.nome, statusAtualizadoEm: serverTimestamp() });
         } catch (error) { console.error(error); sel.value = oc.status; alert('Não foi possível mudar o status.'); }
     });
 }
 
+// Mesmas colunas da planilha original de OCs, mais Raça, Solicitante e Responsável no fim.
+// Uma linha por origem, como na planilha.
 function exportarCsv() {
-    const colunas = ['OC', 'Data', 'Tipo', 'Sexo', 'Raça', 'Quantidade', 'Origem', 'Qtd. origem', 'Sequência', 'R$/@', 'Destino', 'Proprietário', 'Data prevista', 'Trava', 'Status', 'Solicitante', 'Responsável', 'Observação', 'Telefone'];
+    const colunas = ['Status da OC', 'OC', 'Qtd cb', 'Sexo', 'Operação', 'Proprietário', 'Origem', 'Destino', 'Sequência de OC', 'Data', 'Trava', 'Observação', 'Raça', 'Solicitante', 'Responsável'];
     const celula = v => { const t = String(v ?? ''); return /[";\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
     const linhas = [];
     for (const oc of ocsFiltradas().reverse()) {
         const origens = oc.origens?.length ? oc.origens : [{}];
         for (const o of origens) {
-            linhas.push([oc.numero, formatarData(oc.dataEmissao), oc.tipo, oc.sexo, oc.raca, oc.quantidade, o.origem, o.quantidade, o.sequencia,
-                o.preco != null ? formatarPreco(o.preco) : '', oc.destino, oc.proprietario, formatarData(oc.dataPrevista), oc.trava, oc.status,
-                oc.solicitante, oc.responsavel, oc.observacao, oc.telefone].map(celula).join(';'));
+            const obs = [o.preco != null ? `R$ ${formatarPreco(o.preco)}/@` : '', o.obs, oc.observacao].filter(Boolean).join(' | ');
+            linhas.push([oc.status, rotuloOc(oc), o.quantidade, oc.sexo, oc.tipo, oc.proprietario, o.origem, oc.destino, o.sequencia,
+                formatarData(dataOc(oc)), oc.trava ? `Travar ${oc.trava}` : '', obs, oc.raca, oc.solicitante, oc.responsavel].map(celula).join(';'));
         }
     }
     // BOM + ";" para o Excel em português abrir com acentos e colunas certas
@@ -532,6 +540,54 @@ function montarCadastros() {
             } catch (error) { console.error(error); status.textContent = 'Não foi possível salvar.'; }
         });
     });
+    montarImportacao();
+}
+
+function montarImportacao() {
+    let lido = null;
+    const status = $('status-importar');
+    $('arquivos-importar').addEventListener('change', async e => {
+        lido = await lerArquivosPlanilha([...e.target.files]);
+        const existentes = new Set(estado.ocs.map(o => o.id));
+        const novas = lido.ocs ? lido.ocs.filter(o => !existentes.has(o.id)).length : 0;
+        status.textContent = [
+            lido.ocs ? `${lido.ocs.length} OCs no arquivo, ${novas} novas para importar.` : '',
+            lido.cadastros ? `Cadastros: ${lido.cadastros.fazendas.length} fazendas de destino, ${lido.cadastros.origens.length} outras origens, ${lido.cadastros.racas.length} raças, ${lido.cadastros.responsaveis.length} responsáveis.` : '',
+            ...lido.erros
+        ].filter(Boolean).join(' ');
+        $('btn-importar').disabled = !(novas || lido.cadastros);
+    });
+    $('btn-importar').onclick = async () => {
+        if (!lido) return;
+        const botao = $('btn-importar');
+        const existentes = new Set(estado.ocs.map(o => o.id));
+        const novas = (lido.ocs || []).filter(o => !existentes.has(o.id));
+        const avisoListas = lido.cadastros ? '\nAs listas de cadastro serão substituídas pelas do arquivo.' : '';
+        if (!confirm(`Importar ${novas.length} OCs?${avisoListas}`)) return;
+        botao.disabled = true;
+        try {
+            if (lido.cadastros) {
+                for (const [nome, itens] of Object.entries(lido.cadastros)) {
+                    await setDoc(doc(db, 'listas', nome), { itens: [...itens].sort(compararNomes), atualizadoPor: estado.usuario.login, atualizadoEm: serverTimestamp() });
+                }
+            }
+            for (let i = 0; i < novas.length; i += 200) {
+                const lote = writeBatch(db);
+                for (const oc of novas.slice(i, i + 200)) {
+                    lote.set(doc(db, 'ocs', oc.id), { ...oc.dados, importadaPor: estado.usuario.login, importadaEm: serverTimestamp() });
+                }
+                await lote.commit();
+                status.textContent = `Importando... ${Math.min(i + 200, novas.length)} de ${novas.length} OCs.`;
+            }
+            status.textContent = `Pronto: ${novas.length} OCs importadas${lido.cadastros ? ' e cadastros atualizados' : ''}.`;
+            lido = null;
+            $('arquivos-importar').value = '';
+        } catch (error) {
+            console.error(error);
+            status.textContent = 'A importação parou no meio. Escolha os arquivos de novo e clique em Importar: o que já entrou é pulado.';
+            botao.disabled = false;
+        }
+    };
 }
 
 function renderCadastros() {

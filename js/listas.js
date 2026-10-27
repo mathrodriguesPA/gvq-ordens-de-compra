@@ -16,7 +16,7 @@ export const LISTAS_PADRAO = {
 
 export const NOMES_LISTAS = {
     fazendas: 'Fazendas de destino',
-    origens: 'Origens',
+    origens: 'Outras origens (fornecedores, confinamentos)',
     racas: 'Raças',
     responsaveis: 'Responsáveis'
 };
@@ -28,4 +28,11 @@ export const SITUACOES = {
     gerada: { texto: 'OC gerada', classe: 'tag-verde' }
 };
 
-export const CLASSE_STATUS_OC = { Pendente: 'tag-alerta', Aberto: 'tag-indigo', Finalizado: 'tag-verde', Cancelado: 'tag-perigo' };
+export const DESCRICAO_STATUS_OC = {
+    Pendente: 'aguardando viabilidade comercial da BU',
+    Aberto: 'viabilidade aprovada, aguardando embarque',
+    Finalizado: 'movimentação concluída',
+    Cancelado: 'OC cancelada'
+};
+
+export const CLASSE_STATUS_OC ={ Pendente: 'tag-alerta', Aberto: 'tag-indigo', Finalizado: 'tag-verde', Cancelado: 'tag-perigo' };

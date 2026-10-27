@@ -196,6 +196,19 @@
                     <p class="pagina-descricao">Listas que aparecem como sugestão ou opção no formulário. Um item por linha.</p>
                 </div>
             </div>
+            <section class="card" id="card-importar">
+                <div class="card-cabecalho">
+                    <div>
+                        <h2 class="card-titulo">Carga inicial do sistema antigo</h2>
+                        <p class="card-subtitulo">Escolha os arquivos <strong>ocs-planilha.json</strong> e <strong>cadastros.json</strong> da pasta <em>dados-iniciais</em> do zip antigo. OCs que já existem aqui são puladas, então pode repetir sem duplicar.</p>
+                    </div>
+                </div>
+                <div class="linha">
+                    <input id="arquivos-importar" type="file" accept=".json,application/json" multiple>
+                    <button id="btn-importar" class="btn btn-primario" type="button" disabled>Importar</button>
+                </div>
+                <p id="status-importar" class="ajuda" role="status"></p>
+            </section>
             <div id="grade-cadastros" class="grade-cadastros"></div>
         </section>
 
