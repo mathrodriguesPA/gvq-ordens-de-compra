@@ -204,38 +204,15 @@
             <div class="pagina-cabecalho">
                 <div>
                     <h1 class="pagina-titulo">Usuários</h1>
-                    <p class="pagina-descricao">Crie acessos, troque perfis, redefina senhas e desative quem não usa mais o sistema.</p>
+                    <p class="pagina-descricao">Cada pessoa cria o próprio acesso na tela de entrada e começa como Solicitante. Aqui você troca o perfil e desativa quem não deve mais entrar.</p>
                 </div>
             </div>
-            <form id="form-usuario" class="card">
-                <h2 class="card-titulo">Novo usuário</h2>
-                <div class="form-grid grade-usuario">
-                    <div class="form-group">
-                        <label for="u-nome">Nome completo</label>
-                        <input id="u-nome" required minlength="3" maxlength="100" autocomplete="off">
-                    </div>
-                    <div class="form-group">
-                        <label for="u-login">Usuário</label>
-                        <input id="u-login" readonly tabindex="-1" placeholder="gerado pelo nome">
-                    </div>
-                    <div class="form-group">
-                        <label for="u-perfil">Perfil</label>
-                        <select id="u-perfil" required>
-                            <option value="solicitante">Solicitante</option>
-                            <option value="analista">Analista</option>
-                        </select>
-                    </div>
-                    <div class="form-group form-group-botao">
-                        <button id="btn-criar-usuario" class="btn btn-primario" type="submit">Criar usuário</button>
-                    </div>
-                </div>
-            </form>
-            <div id="senha-temporaria" class="aviso aviso-sucesso" role="status" hidden></div>
+            <div class="aviso"><div><strong>Esqueceu a senha?</strong> No Console do Firebase, abra Authentication → Usuários, apague a conta <em>usuario@gvq.com.br</em> e peça para a pessoa criar o acesso de novo com o mesmo nome. O perfil e o histórico continuam.</div></div>
             <section class="card card-tabela">
                 <div class="tabela-wrap">
                     <table>
-                        <thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Situação</th><th></th></tr></thead>
-                        <tbody id="tbody-usuarios"><tr><td class="celula-vazia" colspan="5">Carregando...</td></tr></tbody>
+                        <thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Situação</th></tr></thead>
+                        <tbody id="tbody-usuarios"><tr><td class="celula-vazia" colspan="4">Carregando...</td></tr></tbody>
                     </table>
                 </div>
             </section>

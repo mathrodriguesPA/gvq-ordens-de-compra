@@ -6,6 +6,14 @@ body { background: #fff; }
 .auth-logo { display: block; width: 168px; height: auto; margin: 0 auto 28px; }
 .auth-titulo { text-align: center; font-size: 22px; color: var(--cor-marca); }
 .auth-subtitulo { text-align: center; color: var(--cor-texto-2); margin: 6px 0 28px; }
+
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin: 24px 0; background: var(--cinza-100); border-radius: 12px; }
+.tab { height: 40px; border: 0; border-radius: 9px; background: transparent; color: var(--cor-texto-2); font-size: 14px; font-weight: 600; cursor: pointer; }
+.tab:hover { color: var(--indigo-900); }
+.tab.ativa { background: var(--verde-600); color: #fff; box-shadow: var(--sombra-sm); }
+.btn-primario { background: var(--verde-600); }
+.btn-primario:hover:not(:disabled) { background: var(--verde-700); }
+.auth-form[hidden] { display: none; }
 .auth-form { display: flex; flex-direction: column; gap: 18px; }
 .auth-form .btn { margin-top: 4px; }
 .auth-rodape { margin-top: 20px; text-align: center; font-size: 13px; color: var(--cor-texto-3); }

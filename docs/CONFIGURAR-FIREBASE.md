@@ -1,63 +1,36 @@
-# Configurar o Firebase
+# Configurar e manter o Firebase
 
-Ordem dos passos para colocar o sistema no ar. Os passos marcados com **(console)** são feitos em https://console.firebase.google.com.
+Projeto: **GVQ Ordens de Compra** (`gvq-ordens-de-compra`), no plano gratuito (Spark). Console: https://console.firebase.google.com/project/gvq-ordens-de-compra
 
-## 1. Criar o projeto (console)
+## O que já está configurado
 
-1. **Adicionar projeto** → nome sugerido: `gvq-ordens-de-compra`. O Google Analytics pode ficar desligado.
-2. Em **Configurações do projeto → Seus apps**, adicionar um app **Web** (ícone `</>`). Não precisa marcar o Firebase Hosting, porque o site fica no GitHub Pages.
-3. Copiar o objeto `firebaseConfig` mostrado e colar em [`js/firebase.js`](../js/firebase.js).
+- App Web registrado; os dados dele estão em [`js/firebase.js`](../js/firebase.js).
+- **Authentication → Método de login:** E-mail/senha ativado. O e-mail é interno (`usuario@gvq.com.br`); ninguém digita e-mail.
+- **Authentication → Configurações → Ações do usuário:** "Ativar criação (inscrição)" ligado, para cada pessoa criar o próprio acesso.
+- **Authentication → Configurações → Domínios autorizados:** `wiziackmatheeus-sys.github.io`.
+- **Firestore:** banco `(default)` em `southamerica-east1` (São Paulo), modo de produção.
+- **Firestore → config/contador:** `proxima` = 1652, o número da próxima OC.
 
-## 2. Login (console)
+## Publicar as regras de segurança
 
-1. **Authentication → Começar → Método de login → E-mail/senha → Ativar**. Deixar "Link de e-mail" desligado.
-2. **Authentication → Configurações → Domínios autorizados → Adicionar domínio:** `wiziackmatheeus-sys.github.io`.
+As regras ficam em [`firestore.rules`](../firestore.rules). Depois de mudar o arquivo:
 
-## 3. Banco de dados (console)
+1. Console → **Firestore Database → Regras**.
+2. Apagar o conteúdo, colar o arquivo inteiro e clicar em **Publicar**.
 
-1. **Firestore Database → Criar banco de dados** → local `southamerica-east1 (São Paulo)` → modo de produção.
-2. Publicar as regras pela linha de comando, na pasta do projeto:
+## Primeiro analista
 
-   ```sh
-   firebase use --add          # escolher o projeto criado
-   firebase deploy --only firestore:rules
-   ```
+1. No site, a pessoa clica em **Criar acesso** e se cadastra. Ela entra como Solicitante.
+2. Console → **Firestore Database → Dados → usuarios →** documento com o login dela (ex.: `matheus.souza`).
+3. Clicar no campo `perfil`, trocar `solicitante` por `analista` e salvar.
+4. Sair e entrar de novo no site. Os próximos analistas podem ser promovidos pela aba **Usuários**.
 
-3. Criar o contador de OCs: coleção `config`, documento `contador`, campo `proxima` (number) = `1652`.
+## Senha esquecida
 
-## 4. Funções de contas (plano Blaze)
+Não há redefinição de senha. Quando alguém esquece:
 
-Criar usuários e redefinir senhas exige Cloud Functions, que só rodam no plano **Blaze** (cobrança por uso; neste volume deve ficar perto de zero). Em **Uso e faturamento → Detalhes e configurações → Modificar plano**, mudar para Blaze. Vale também criar um alerta de orçamento baixo, por exemplo R$ 10.
+1. Console → **Authentication → Usuários**.
+2. Procurar `login@gvq.com.br` (ex.: `matheus.silveira@gvq.com.br`), clicar nos três pontinhos → **Excluir conta**.
+3. A pessoa clica em **Criar acesso** no site, digita o mesmo nome e uma senha nova. Perfil, situação e histórico de solicitações continuam, porque o cadastro em `usuarios` fica guardado pelo login.
 
-```sh
-npm ci --prefix functions
-firebase deploy --only functions
-```
-
-O CLI pede `AUTH_WEB_API_KEY`: é o mesmo `apiKey` colado em `js/firebase.js`.
-
-## 5. Primeiro analista (console)
-
-O primeiro analista é criado à mão, porque ainda não há quem crie pelo site.
-
-1. **Authentication → Usuários → Adicionar usuário**: e-mail `matheus.souza@gvq.com.br` e uma senha temporária de pelo menos 6 caracteres. Copiar o **UID** gerado.
-2. **Firestore → Iniciar coleção** `usuarios` → ID do documento = o UID copiado, com os campos:
-
-   | Campo | Tipo | Valor |
-   |---|---|---|
-   | nome | string | Matheus Souza |
-   | login | string | matheus.souza |
-   | perfil | string | analista |
-   | ativo | boolean | true |
-   | trocaSenhaObrigatoria | boolean | true |
-
-3. Entrar no site com `matheus.souza` e a senha temporária. O sistema pede a troca para uma senha de pelo menos 8 caracteres.
-4. Os demais usuários, como `matheus.silveira` (solicitante), são criados pela aba **Usuários**. O site mostra uma senha temporária para entregar à pessoa.
-
-## 6. Cadastros
-
-Na aba **Cadastros**, colar as 70 fazendas de destino (uma por linha) e as origens. Raças e responsáveis já vêm preenchidos e podem ser editados.
-
-## 7. OCs da planilha
-
-As 552 OCs da planilha original entram por um script de importação, a ser feito com a planilha em mãos. A planilha não vai para o repositório, que é público.
+Para tirar o acesso de alguém, use **Desativar** na aba Usuários. Recriar a conta não reativa um acesso desativado.

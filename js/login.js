@@ -1,55 +1,99 @@
-import { signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { auth, db, configurado, emailDoLogin } from "./firebase.js";
+import { sugerirLogin } from "./util.js";
 
-const form = document.getElementById('form-login');
-const erro = document.getElementById('erro-login');
-const btn = document.getElementById('btn-entrar');
+const $ = id => document.getElementById(id);
+const MENSAGENS = {
+    'auth/invalid-credential': 'Usuário ou senha incorretos.',
+    'auth/invalid-email': 'Usuário ou senha incorretos.',
+    'auth/user-disabled': 'Este acesso está desativado. Fale com o analista.',
+    'auth/email-already-in-use': 'Este usuário já existe. Se esqueceu a senha, peça ao analista para apagar o acesso antigo.',
+    'auth/weak-password': 'Escolha uma senha mais forte, com pelo menos 8 caracteres.',
+    'auth/too-many-requests': 'Muitas tentativas. Aguarde alguns minutos e tente de novo.',
+    'auth/network-request-failed': 'Falha de conexão. Confira a internet e tente novamente.',
+    'auth/operation-not-allowed': 'A criação de acessos está desligada no Firebase.',
+    'auth/admin-restricted-operation': 'A criação de acessos está desligada no Firebase.'
+};
 
 if (!configurado) {
-    erro.textContent = 'Sistema ainda não configurado: falta preencher js/firebase.js com os dados do projeto Firebase.';
-    btn.disabled = true;
+    $('erro-login').textContent = 'Sistema ainda não configurado: falta preencher js/firebase.js com os dados do projeto Firebase.';
+    $('btn-entrar').disabled = $('btn-criar').disabled = true;
 }
 
-let autenticando = false;
-form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (autenticando || !configurado) return;
-    autenticando = true;
-    erro.textContent = '';
-    btn.textContent = 'Entrando...';
-    btn.disabled = true;
-
-    const login = document.getElementById('login_usuario').value.toLowerCase().trim();
-    const senha = document.getElementById('login_senha').value;
-
-    try {
-        const { user } = await signInWithEmailAndPassword(auth, emailDoLogin(login), senha);
-        const snap = await getDoc(doc(db, 'usuarios', user.uid));
-        const perfil = snap.exists() ? snap.data() : null;
-        if (!perfil || !['solicitante', 'analista'].includes(perfil.perfil)) {
-            await signOut(auth);
-            erro.textContent = 'Usuário sem perfil cadastrado. Fale com o analista.';
-            return;
-        }
-        if (perfil.ativo === false) {
-            await signOut(auth);
-            erro.textContent = 'Este acesso está desativado. Fale com o analista.';
-            return;
-        }
-        location.href = perfil.trocaSenhaObrigatoria ? 'pages/trocar-senha.html' : 'pages/app.html';
-    } catch (error) {
-        const mensagens = {
-            'auth/invalid-credential': 'Usuário ou senha incorretos.',
-            'auth/invalid-email': 'Usuário ou senha incorretos.',
-            'auth/user-disabled': 'Este acesso está desativado. Fale com o analista.',
-            'auth/too-many-requests': 'Muitas tentativas. Aguarde alguns minutos e tente de novo.',
-            'auth/network-request-failed': 'Falha de conexão. Confira a internet e tente novamente.'
-        };
-        erro.textContent = mensagens[error.code] || 'Não foi possível entrar. Tente novamente.';
-    } finally {
-        autenticando = false;
-        btn.textContent = 'Entrar';
-        btn.disabled = !configurado;
+function mostrarAba(criar) {
+    for (const [aba, form, ativa] of [['aba-entrar', 'form-login', !criar], ['aba-criar', 'form-cadastro', criar]]) {
+        $(aba).classList.toggle('ativa', ativa);
+        $(aba).setAttribute('aria-selected', String(ativa));
+        $(form).hidden = !ativa;
     }
+}
+$('aba-entrar').onclick = () => mostrarAba(false);
+$('aba-criar').onclick = () => mostrarAba(true);
+
+// Garante o cadastro no banco e entra. O cadastro fica guardado pelo login: quem cria o acesso
+// pela primeira vez começa como solicitante (o analista promove na aba Usuários); quem recria
+// o acesso depois de esquecer a senha retoma o mesmo cadastro, com perfil e histórico.
+async function abrirSistema(user, nome) {
+    const login = user.email.split('@')[0];
+    const ref = doc(db, 'usuarios', login);
+    let snap = await getDoc(ref);
+    if (!snap.exists()) {
+        await setDoc(ref, { nome: nome || user.displayName || login, uid: user.uid, perfil: 'solicitante', ativo: true, criadoEm: serverTimestamp() });
+        snap = await getDoc(ref);
+    } else if (snap.data().uid !== user.uid) {
+        await updateDoc(ref, { uid: user.uid, recriadoEm: serverTimestamp() });
+        snap = await getDoc(ref);
+    }
+    const perfil = snap.data();
+    if (perfil.ativo === false) {
+        await signOut(auth);
+        throw Object.assign(new Error(), { code: 'auth/user-disabled' });
+    }
+    location.href = 'pages/app.html';
+}
+
+let ocupado = false;
+async function executar(botao, erro, rotulo, acao) {
+    if (ocupado || !configurado) return;
+    ocupado = true;
+    $(erro).textContent = '';
+    const texto = $(botao).textContent;
+    $(botao).textContent = rotulo;
+    $(botao).disabled = true;
+    try { await acao(); }
+    catch (error) {
+        console.error(error);
+        $(erro).textContent = error.mensagem || MENSAGENS[error.code] || 'Não foi possível concluir. Tente novamente.';
+    } finally {
+        ocupado = false;
+        $(botao).textContent = texto;
+        $(botao).disabled = false;
+    }
+}
+
+$('form-login').addEventListener('submit', e => {
+    e.preventDefault();
+    executar('btn-entrar', 'erro-login', 'Entrando...', async () => {
+        const login = $('login_usuario').value.toLowerCase().trim();
+        const { user } = await signInWithEmailAndPassword(auth, emailDoLogin(login), $('login_senha').value);
+        await abrirSistema(user);
+    });
+});
+
+$('cadastro_nome').addEventListener('input', () => { $('cadastro_usuario').value = sugerirLogin($('cadastro_nome').value); });
+
+$('form-cadastro').addEventListener('submit', e => {
+    e.preventDefault();
+    executar('btn-criar', 'erro-cadastro', 'Criando...', async () => {
+        const nome = $('cadastro_nome').value.trim().replace(/\s+/g, ' ');
+        const login = sugerirLogin(nome);
+        const senha = $('cadastro_senha').value;
+        if (!login) throw { mensagem: 'Informe nome e sobrenome para gerar o usuário.' };
+        if (senha.length < 8) throw { mensagem: 'A senha precisa ter pelo menos 8 caracteres.' };
+        if (senha !== $('cadastro_confirmar').value) throw { mensagem: 'As senhas precisam ser iguais.' };
+        const { user } = await createUserWithEmailAndPassword(auth, emailDoLogin(login), senha);
+        await updateProfile(user, { displayName: nome }).catch(() => {});
+        await abrirSistema(user, nome);
+    });
 });

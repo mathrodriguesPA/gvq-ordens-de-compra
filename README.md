@@ -2,18 +2,17 @@
 
 Sistema do Grupo Vilela de Queiroz para solicitar e emitir Ordens de Compra (OC) de compra, transferência e trading de gado entre as fazendas.
 
-- **Site:** páginas estáticas publicadas pelo GitHub Pages (`index.html`, `pages/`, `js/`, `css/`).
-- **Banco e login:** Firebase (Authentication + Firestore). As permissões ficam em [`firestore.rules`](firestore.rules).
-- **Contas:** criar usuário, redefinir senha e trocar a senha temporária passam pelas Cloud Functions em [`functions/`](functions/), como no GVQ Sistema Integrado.
+- **Site:** páginas estáticas no GitHub Pages: https://wiziackmatheeus-sys.github.io/gvq-ordens-de-compra/
+- **Banco e login:** Firebase (Authentication + Firestore), plano gratuito. As permissões ficam em [`firestore.rules`](firestore.rules).
 
-## Perfis
+## Acesso
+
+Login simples: usuário (`nome.sobrenome`, gerado pelo nome) e senha de pelo menos 8 caracteres. Cada pessoa cria o próprio acesso e começa como **Solicitante**; o analista promove a **Analista** ou desativa na aba Usuários. Não há e-mail nem redefinição de senha: quem esquece tem a conta apagada no Console do Firebase e cria de novo (veja [docs/CONFIGURAR-FIREBASE.md](docs/CONFIGURAR-FIREBASE.md)).
 
 | Perfil | Abas |
 |---|---|
 | Solicitante | Nova solicitação, Minhas solicitações |
 | Analista | Todas: Nova solicitação, Minhas solicitações, Análise, Ordens de compra, Cadastros, Usuários |
-
-O login é só o usuário (`nome.sobrenome`). Por baixo, o Firebase usa o e-mail interno `nome.sobrenome@gvq.com.br`, que ninguém precisa conhecer.
 
 ## Fluxo
 
@@ -25,15 +24,11 @@ O login é só o usuário (`nome.sobrenome`). Por baixo, o Firebase usa o e-mail
 
 | Coleção | Conteúdo |
 |---|---|
-| `usuarios/{uid}` | nome, login, perfil, ativo, trocaSenhaObrigatoria |
-| `solicitacoes/{id}` | pedido do formulário, status (`aguardando`, `ajuste`, `recusada`, `gerada`), ocNumero |
+| `usuarios/{login}` | nome, uid da conta, perfil, ativo |
+| `solicitacoes/{id}` | pedido do formulário, status (`aguardando`, `ajuste`, `recusada`, `gerada`), ocNumero, criadoPor (login) |
 | `ocs/{numero}` | OC com `origens: [{ origem, quantidade, sequencia, preco }]`, trava e status |
 | `config/contador` | `proxima`: número da próxima OC |
 | `listas/{fazendas, origens, racas, responsaveis}` | `itens`: listas editadas na aba Cadastros |
-
-## Configuração
-
-Passo a passo em [docs/CONFIGURAR-FIREBASE.md](docs/CONFIGURAR-FIREBASE.md).
 
 ## Rodar localmente
 

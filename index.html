@@ -19,9 +19,13 @@
         <div class="auth-card">
             <img class="auth-logo" src="assets/img/logo-gvq.png" alt="GVQ — Grupo Vilela de Queiroz">
             <h1 class="auth-titulo">Ordens de Compra</h1>
-            <p class="auth-subtitulo">Entre com seu usuário e senha.</p>
 
-            <form id="form-login" class="auth-form">
+            <div class="tabs" role="tablist" aria-label="Acesso ao sistema">
+                <button type="button" id="aba-entrar" class="tab ativa" role="tab" aria-selected="true" aria-controls="form-login">Entrar</button>
+                <button type="button" id="aba-criar" class="tab" role="tab" aria-selected="false" aria-controls="form-cadastro">Criar acesso</button>
+            </div>
+
+            <form id="form-login" class="auth-form" role="tabpanel">
                 <div class="form-group">
                     <label for="login_usuario">Usuário</label>
                     <div class="campo-icone">
@@ -38,8 +42,30 @@
                 </div>
                 <p id="erro-login" class="erro-form" role="alert"></p>
                 <button type="submit" id="btn-entrar" class="btn btn-primario btn-lg btn-bloco">Entrar</button>
+                <p class="auth-rodape">Esqueceu a senha? Peça ao analista para apagar seu acesso e crie um novo.</p>
             </form>
-            <p class="auth-rodape">Esqueceu a senha? Peça ao analista para redefinir.</p>
+
+            <form id="form-cadastro" class="auth-form" role="tabpanel" hidden>
+                <div class="form-group">
+                    <label for="cadastro_nome">Nome e sobrenome</label>
+                    <input id="cadastro_nome" required minlength="3" maxlength="100" autocomplete="name">
+                </div>
+                <div class="form-group">
+                    <label for="cadastro_usuario">Seu usuário</label>
+                    <input id="cadastro_usuario" readonly tabindex="-1" placeholder="gerado pelo nome" autocomplete="username">
+                    <small class="ajuda">Use este usuário para entrar.</small>
+                </div>
+                <div class="form-group">
+                    <label for="cadastro_senha">Senha (mínimo 8 caracteres)</label>
+                    <input type="password" id="cadastro_senha" required minlength="8" maxlength="128" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label for="cadastro_confirmar">Confirme a senha</label>
+                    <input type="password" id="cadastro_confirmar" required minlength="8" maxlength="128" autocomplete="new-password">
+                </div>
+                <p id="erro-cadastro" class="erro-form" role="alert"></p>
+                <button type="submit" id="btn-criar" class="btn btn-primario btn-lg btn-bloco">Criar acesso</button>
+            </form>
         </div>
     </main>
 

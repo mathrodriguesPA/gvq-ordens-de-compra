@@ -3,9 +3,8 @@ import {
     collection, doc, getDoc, onSnapshot, query, where, addDoc, updateDoc, setDoc, runTransaction, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { auth, db } from "./firebase.js";
-import { chamarConta } from "./contas-api.js";
 import { TIPOS, SEXOS, PROPRIETARIOS, TRAVAS, STATUS_OC, LISTAS_PADRAO, NOMES_LISTAS, SITUACOES, CLASSE_STATUS_OC } from "./listas.js";
-import { escapar, formatarData, formatarNumero, formatarPreco, lerNumero, hojeIso, compararNomes, contemTermos, sugerirLogin } from "./util.js";
+import { escapar, formatarData, formatarNumero, formatarPreco, lerNumero, hojeIso, compararNomes, contemTermos } from "./util.js";
 
 const $ = id => document.getElementById(id);
 const estado = {
@@ -44,14 +43,14 @@ if (!auth) location.href = '../index.html';
 else onAuthStateChanged(auth, async user => {
     if (!user) { location.href = '../index.html'; return; }
     try {
-        const snap = await getDoc(doc(db, 'usuarios', user.uid));
+        const login = user.email.split('@')[0];
+        const snap = await getDoc(doc(db, 'usuarios', login));
         const perfil = snap.exists() ? snap.data() : null;
-        if (!perfil || !['solicitante', 'analista'].includes(perfil.perfil) || perfil.ativo === false) {
+        if (!perfil || perfil.uid !== user.uid || !['solicitante', 'analista'].includes(perfil.perfil) || perfil.ativo === false) {
             alert('Acesso não liberado. Fale com o analista.');
             return sair();
         }
-        if (perfil.trocaSenhaObrigatoria) { location.href = 'trocar-senha.html'; return; }
-        estado.usuario = { ...perfil, uid: user.uid };
+        estado.usuario = { ...perfil, login, uid: user.uid };
         iniciar();
     } catch (error) {
         console.error(error);
@@ -73,11 +72,11 @@ function iniciar() {
         snap.forEach(d => { if (Array.isArray(d.data().itens)) estado.listas[d.id] = d.data().itens; });
         atualizarListas();
     }, falhar));
-    cancelamentos.push(onSnapshot(query(collection(db, 'solicitacoes'), where('criadoPor', '==', u.uid)), snap => {
-        estado.minhas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    cancelamentos.push(onSnapshot(query(collection(db, 'solicitacoes'), where('criadoPor', '==', u.login)), snap => {
+        estado.minhas =snap.docs.map(d => ({ id: d.id, ...d.data() }));
         renderMinhas();
     }, falhar));
-    cancelamentos.push(onSnapshot(query(collection(db, 'ocs'), where('criadoPor', '==', u.uid)), snap => {
+    cancelamentos.push(onSnapshot(query(collection(db, 'ocs'), where('criadoPor', '==', u.login)), snap => {
         estado.minhasOcs = new Map(snap.docs.map(d => [d.data().numero, d.data()]));
         renderMinhas();
     }, falhar));
@@ -92,12 +91,11 @@ function iniciar() {
             renderOcs();
         }, falhar));
         cancelamentos.push(onSnapshot(collection(db, 'usuarios'), snap => {
-            estado.usuarios = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+            estado.usuarios = snap.docs.map(d => ({ ...d.data(), login: d.id }));
             renderUsuarios();
         }, falhar));
         montarOcs();
         montarCadastros();
-        montarUsuarios();
     }
 
     const inicial = location.hash.slice(1);
@@ -114,8 +112,6 @@ function mostrarAba(nome) {
         b.setAttribute('aria-current', ativa ? 'page' : 'false');
     });
     document.querySelectorAll('.painel').forEach(p => { p.hidden = p.id !== 'aba-' + nome; });
-    // A senha temporária só fica na tela enquanto a aba Usuários estiver aberta.
-    if (nome !== 'usuarios') { $('senha-temporaria').hidden = true; $('senha-temporaria').innerHTML = ''; }
     history.replaceState(null, '', '#' + nome);
 }
 document.querySelectorAll('.aba').forEach(b => b.addEventListener('click', () => mostrarAba(b.dataset.aba)));
@@ -243,7 +239,7 @@ async function enviarSolicitacao(e) {
         } else {
             await addDoc(collection(db, 'solicitacoes'), {
                 ...dados, status: 'aguardando', mensagemAnalista: '',
-                criadoPor: estado.usuario.uid, criadoPorNome: estado.usuario.nome,
+                criadoPor: estado.usuario.login, criadoPorNome: estado.usuario.nome,
                 criadoEm: serverTimestamp(), atualizadoEm: serverTimestamp()
             });
         }
@@ -372,7 +368,7 @@ function lerOrigens() {
     return origens;
 }
 
-const assinaturaAnalise = () => ({ analisadoPor: estado.usuario.uid, analisadoPorNome: estado.usuario.nome, analisadoEm: serverTimestamp() });
+const assinaturaAnalise = () => ({ analisadoPor: estado.usuario.login, analisadoPorNome: estado.usuario.nome, analisadoEm: serverTimestamp() });
 
 let analisando = false;
 async function comBloqueio(acao) {
@@ -415,7 +411,7 @@ $('btn-gerar-oc').onclick = () => comBloqueio(async () => {
             observacao: s.observacao || '', telefone: s.telefone || '',
             solicitante: s.solicitante, responsavel: s.responsavel,
             criadoPor: s.criadoPor, solicitacaoId: s.id,
-            geradaPor: estado.usuario.uid, geradaPorNome: estado.usuario.nome, geradaEm: serverTimestamp()
+            geradaPor: estado.usuario.login, geradaPorNome: estado.usuario.nome, geradaEm: serverTimestamp()
         });
         t.update(refContador, { proxima: n + 1 });
         t.update(refSol, { status: 'gerada', ocNumero: n, mensagemAnalista: '', ...assinaturaAnalise() });
@@ -487,7 +483,7 @@ function renderOcs() {
         const oc = estado.ocs.find(o => o.id === sel.dataset.oc);
         if (!confirm(`Mudar a OC ${oc.numero} de ${oc.status} para ${sel.value}?`)) { sel.value = oc.status; return; }
         try {
-            await updateDoc(doc(db, 'ocs', oc.id), { status: sel.value, statusAtualizadoPor: estado.usuario.uid, statusAtualizadoPorNome: estado.usuario.nome, statusAtualizadoEm: serverTimestamp() });
+            await updateDoc(doc(db, 'ocs', oc.id), { status: sel.value, statusAtualizadoPor: estado.usuario.login, statusAtualizadoPorNome: estado.usuario.nome, statusAtualizadoEm: serverTimestamp() });
         } catch (error) { console.error(error); sel.value = oc.status; alert('Não foi possível mudar o status.'); }
     });
 }
@@ -530,7 +526,7 @@ function montarCadastros() {
             const itens = [...new Set(area.value.split('\n').map(l => l.trim()).filter(Boolean))].sort(compararNomes);
             const status = form.querySelector('[data-status]');
             try {
-                await setDoc(doc(db, 'listas', form.dataset.lista), { itens, atualizadoPor: estado.usuario.uid, atualizadoEm: serverTimestamp() });
+                await setDoc(doc(db, 'listas', form.dataset.lista), { itens, atualizadoPor: estado.usuario.login, atualizadoEm: serverTimestamp() });
                 delete form.dataset.alterado;
                 status.textContent = 'Salvo.';
             } catch (error) { console.error(error); status.textContent = 'Não foi possível salvar.'; }
@@ -548,76 +544,40 @@ function renderCadastros() {
 
 // ---------------------------------------------------------------------------
 // Usuários (analista)
+// Cada pessoa cria o próprio acesso. Senha esquecida: o analista apaga a conta em
+// Authentication, no Console do Firebase, e a pessoa cria de novo com o mesmo usuário,
+// mantendo perfil e histórico (o cadastro fica guardado pelo login).
 // ---------------------------------------------------------------------------
-function mostrarSenhaTemporaria(login, senha, acao) {
-    const aviso = $('senha-temporaria');
-    aviso.hidden = false;
-    aviso.innerHTML = `<div>${acao} <strong>${escapar(login)}</strong>. Senha temporária: <span class="senha-codigo">${escapar(senha)}</span>
-        <br>Passe para a pessoa; no primeiro acesso ela vai trocar por uma senha própria. A senha não fica salva e some ao sair desta aba.</div>
-        <button type="button" class="btn btn-fantasma btn-sm" aria-label="Fechar aviso"><svg class="icon"><use href="../assets/img/icones.svg#fechar"></use></svg></button>`;
-    aviso.querySelector('button').onclick = () => { aviso.hidden = true; aviso.innerHTML = ''; };
-}
-
-function montarUsuarios() {
-    $('u-nome').addEventListener('input', () => { $('u-login').value = sugerirLogin($('u-nome').value); });
-    $('form-usuario').addEventListener('submit', async e => {
-        e.preventDefault();
-        const nome = $('u-nome').value.trim(), login = sugerirLogin(nome), perfil = $('u-perfil').value;
-        if (!login) { alert('Informe nome e sobrenome para gerar o usuário.'); return; }
-        const botao = $('btn-criar-usuario');
-        botao.disabled = true;
-        try {
-            const r = await chamarConta('criarConta', { nome, login, perfil });
-            e.target.reset();
-            mostrarSenhaTemporaria(r.login, r.senhaTemporaria, 'Usuário criado:');
-        } catch (error) { alert(error.message); }
-        finally { botao.disabled = false; }
-    });
-}
-
 function renderUsuarios() {
     const lista = [...estado.usuarios].sort((a, b) => compararNomes(a.nome, b.nome));
-    if (!lista.length) return vazio('tbody-usuarios', 5, 'Nenhum usuário.');
-    const eu = estado.usuario.uid;
+    if (!lista.length) return vazio('tbody-usuarios', 4, 'Nenhum usuário.');
+    const eu = estado.usuario.login;
     $('tbody-usuarios').innerHTML = lista.map(u => {
-        const proprio = u.uid === eu;
-        const situacao = u.ativo === false ? tag('Desativado', 'tag-perigo')
-            : u.trocaSenhaObrigatoria ? tag('Troca de senha pendente', 'tag-alerta') : tag('Ativo', 'tag-verde');
+        const proprio = u.login === eu;
         return `<tr>
             <td><strong>${escapar(u.nome)}</strong>${proprio ? ' <span class="texto-suave">(você)</span>' : ''}</td>
             <td>${escapar(u.login)}</td>
-            <td><select class="select-status" data-perfil="${u.uid}" ${proprio ? 'disabled' : ''} aria-label="Perfil de ${escapar(u.nome)}">
+            <td><select class="select-status" data-perfil="${escapar(u.login)}" ${proprio ? 'disabled' : ''} aria-label="Perfil de ${escapar(u.nome)}">
                 <option value="solicitante"${u.perfil === 'solicitante' ? ' selected' : ''}>Solicitante</option>
                 <option value="analista"${u.perfil === 'analista' ? ' selected' : ''}>Analista</option>
             </select></td>
-            <td>${situacao}</td>
-            <td><div class="acoes-linha">${proprio ? '' : `
-                <button class="btn btn-secundario btn-sm" data-redefinir="${u.uid}">Redefinir senha</button>
-                <button class="btn ${u.ativo === false ? 'btn-secundario' : 'btn-perigo'} btn-sm" data-ativo="${u.uid}">${u.ativo === false ? 'Reativar' : 'Desativar'}</button>`}
+            <td><div class="acoes-linha">${u.ativo === false ? tag('Desativado', 'tag-perigo') : tag('Ativo', 'tag-verde')}${proprio ? '' : `
+                <button class="btn ${u.ativo === false ? 'btn-secundario' : 'btn-perigo'} btn-sm" data-ativo="${escapar(u.login)}">${u.ativo === false ? 'Reativar' : 'Desativar'}</button>`}
             </div></td>
         </tr>`;
     }).join('');
-    const achar = uid => estado.usuarios.find(u => u.uid === uid);
+    const achar = login => estado.usuarios.find(u => u.login === login);
     $('tbody-usuarios').querySelectorAll('[data-perfil]').forEach(sel => sel.onchange = async () => {
         const u = achar(sel.dataset.perfil);
         if (!confirm(`Mudar ${u.nome} para ${sel.value === 'analista' ? 'Analista' : 'Solicitante'}?`)) { sel.value = u.perfil; return; }
-        try { await updateDoc(doc(db, 'usuarios', u.uid), { perfil: sel.value }); }
+        try { await updateDoc(doc(db, 'usuarios', u.login), { perfil: sel.value }); }
         catch (error) { console.error(error); sel.value = u.perfil; alert('Não foi possível mudar o perfil.'); }
     });
     $('tbody-usuarios').querySelectorAll('[data-ativo]').forEach(b => b.onclick = async () => {
         const u = achar(b.dataset.ativo), ativar = u.ativo === false;
         if (!confirm(`${ativar ? 'Reativar' : 'Desativar'} o acesso de ${u.nome}?`)) return;
-        try { await updateDoc(doc(db, 'usuarios', u.uid), { ativo: ativar }); }
+        try { await updateDoc(doc(db, 'usuarios', u.login), { ativo: ativar }); }
         catch (error) { console.error(error); alert('Não foi possível alterar o acesso.'); }
     });
-    $('tbody-usuarios').querySelectorAll('[data-redefinir]').forEach(b => b.onclick = async () => {
-        const u = achar(b.dataset.redefinir);
-        if (!confirm(`Redefinir a senha de ${u.nome}? A senha atual deixa de funcionar.`)) return;
-        b.disabled = true;
-        try {
-            const r = await chamarConta('redefinirSenha', { uid: u.uid });
-            mostrarSenhaTemporaria(r.login, r.senhaTemporaria, 'Senha redefinida para');
-        } catch (error) { alert(error.message); }
-        finally { b.disabled = false; }
-    });
 }
+
