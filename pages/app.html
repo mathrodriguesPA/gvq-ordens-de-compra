@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GVQ - Ordens de Compra</title>
+    <meta name="theme-color" content="#FFFFFF">
+    <meta name="color-scheme" content="light">
+    <link rel="icon" type="image/png" href="../assets/img/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700;800&display=swap">
+    <link rel="stylesheet" href="../css/base.css">
+    <link rel="stylesheet" href="../css/app.css">
+</head>
+<body>
+    <header class="topo">
+        <div class="topo-inner">
+            <img class="topo-logo" src="../assets/img/logo-gvq.png" alt="GVQ — Grupo Vilela de Queiroz">
+            <span class="topo-sistema">Ordens de Compra</span>
+            <div class="topo-usuario">
+                <span id="nome-usuario" class="topo-nome"></span>
+                <span id="perfil-usuario" class="tag"></span>
+                <button id="btn-sair" class="btn btn-fantasma btn-sm" type="button">
+                    <svg class="icon"><use href="../assets/img/icones.svg#sair"></use></svg><span>Sair</span>
+                </button>
+            </div>
+        </div>
+        <nav class="abas" aria-label="Seções" hidden>
+            <button type="button" class="aba" data-aba="nova">Nova solicitação</button>
+            <button type="button" class="aba" data-aba="minhas">Minhas solicitações</button>
+            <button type="button" class="aba" data-aba="analise" data-analista hidden>Análise <span id="contagem-analise" class="contador" hidden></span></button>
+            <button type="button" class="aba" data-aba="ocs" data-analista hidden>Ordens de compra</button>
+            <button type="button" class="aba" data-aba="cadastros" data-analista hidden>Cadastros</button>
+            <button type="button" class="aba" data-aba="usuarios" data-analista hidden>Usuários</button>
+        </nav>
+    </header>
+
+    <main class="conteudo">
+        <p id="carregando" class="texto-suave carregando">Carregando...</p>
+
+        <!-- Nova solicitação -->
+        <section id="aba-nova" class="painel" hidden>
+            <div class="pagina-cabecalho">
+                <div>
+                    <h1 id="titulo-form" class="pagina-titulo">Nova solicitação</h1>
+                    <p class="pagina-descricao">Preencha o pedido de compra ou transferência. O analista avalia e gera a Ordem de Compra.</p>
+                </div>
+            </div>
+            <div id="aviso-ajuste" class="aviso aviso-alerta" hidden></div>
+            <form id="form-solicitacao" class="card" novalidate>
+                <div class="form-grid grade-3">
+                    <div class="form-group">
+                        <label for="f-tipo">Tipo</label>
+                        <div class="opcoes" id="f-tipo" role="radiogroup" data-nome="tipo"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="f-sexo">Sexo</label>
+                        <div class="opcoes" id="f-sexo" role="radiogroup" data-nome="sexo"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="f-proprietario">Proprietário</label>
+                        <div class="opcoes" id="f-proprietario" role="radiogroup" data-nome="proprietario"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="f-raca">Raça</label>
+                        <select id="f-raca" name="raca" required></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="f-quantidade">Quantidade de cabeças</label>
+                        <input id="f-quantidade" name="quantidade" type="number" min="1" step="1" inputmode="numeric" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="f-data">Data prevista</label>
+                        <input id="f-data" name="dataPrevista" type="date" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="f-origem">Origem</label>
+                        <input id="f-origem" name="origem" list="lista-origens" required autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label for="f-destino">Fazenda de destino</label>
+                        <input id="f-destino" name="destino" list="lista-fazendas" required autocomplete="off">
+                    </div>
+                    <div class="form-group" id="grupo-preco" hidden>
+                        <label for="f-preco">Preço R$/@</label>
+                        <input id="f-preco" name="preco" inputmode="decimal" placeholder="0,00">
+                    </div>
+                    <div class="form-group">
+                        <label for="f-solicitante">Solicitante</label>
+                        <input id="f-solicitante" name="solicitante" required autocomplete="name">
+                    </div>
+                    <div class="form-group">
+                        <label for="f-responsavel">Responsável</label>
+                        <select id="f-responsavel" name="responsavel" required></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="f-telefone">Telefone</label>
+                        <input id="f-telefone" name="telefone" type="tel" inputmode="tel" autocomplete="tel">
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="f-observacao">Observação</label>
+                        <textarea id="f-observacao" name="observacao" maxlength="2000"></textarea>
+                    </div>
+                </div>
+                <p id="erro-solicitacao" class="erro-form" role="alert"></p>
+                <div class="form-acoes">
+                    <button type="button" id="btn-cancelar-ajuste" class="btn btn-secundario" hidden>Cancelar correção</button>
+                    <button type="submit" id="btn-enviar" class="btn btn-primario btn-lg">Enviar solicitação</button>
+                </div>
+            </form>
+        </section>
+
+        <!-- Minhas solicitações -->
+        <section id="aba-minhas" class="painel" hidden>
+            <div class="pagina-cabecalho">
+                <div>
+                    <h1 class="pagina-titulo">Minhas solicitações</h1>
+                    <p class="pagina-descricao">Acompanhe a análise e o número e o status da OC de cada pedido.</p>
+                </div>
+            </div>
+            <section class="card card-tabela">
+                <div class="tabela-wrap">
+                    <table>
+                        <thead><tr><th>Enviada em</th><th>Tipo</th><th class="col-num">Cabeças</th><th>Origem → Destino</th><th>Situação</th><th>OC</th><th>Status da OC</th><th></th></tr></thead>
+                        <tbody id="tbody-minhas"><tr><td class="celula-vazia" colspan="8">Carregando...</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+        </section>
+
+        <!-- Análise -->
+        <section id="aba-analise" class="painel" hidden>
+            <div class="pagina-cabecalho">
+                <div>
+                    <h1 class="pagina-titulo">Análise</h1>
+                    <p class="pagina-descricao">Solicitações aguardando análise. Gere a OC, peça ajuste ou recuse.</p>
+                </div>
+            </div>
+            <section class="card card-tabela">
+                <div class="tabela-wrap">
+                    <table>
+                        <thead><tr><th>Enviada em</th><th>Solicitante</th><th>Tipo</th><th>Sexo / Raça</th><th class="col-num">Cabeças</th><th>Origem → Destino</th><th>Data prevista</th><th></th></tr></thead>
+                        <tbody id="tbody-analise"><tr><td class="celula-vazia" colspan="8">Carregando...</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+        </section>
+
+        <!-- Ordens de compra -->
+        <section id="aba-ocs" class="painel" hidden>
+            <div class="pagina-cabecalho">
+                <div>
+                    <h1 class="pagina-titulo">Ordens de compra</h1>
+                    <p class="pagina-descricao">Toda OC nova nasce Pendente, até o gerente da BU aprovar a viabilidade comercial.</p>
+                </div>
+                <div class="pagina-acoes">
+                    <button id="btn-exportar" class="btn btn-secundario" type="button">
+                        <svg class="icon"><use href="../assets/img/icones.svg#download"></use></svg>Exportar CSV
+                    </button>
+                </div>
+            </div>
+            <div id="indicadores-ocs" class="indicadores"></div>
+            <section class="card card-tabela">
+                <div class="card-cabecalho filtros">
+                    <div class="form-group filtro-busca">
+                        <label for="busca-ocs" class="sr-only">Buscar</label>
+                        <input id="busca-ocs" type="search" placeholder="Buscar por OC, origem, destino, responsável...">
+                    </div>
+                    <div class="form-group">
+                        <label for="filtro-status" class="sr-only">Status</label>
+                        <select id="filtro-status"><option value="">Todos os status</option></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="filtro-tipo" class="sr-only">Tipo</label>
+                        <select id="filtro-tipo"><option value="">Todos os tipos</option></select>
+                    </div>
+                </div>
+                <div class="tabela-wrap tabela-lista tabela-ocs">
+                    <table>
+                        <thead><tr><th class="col-num">OC</th><th>Emissão</th><th>Tipo</th><th>Sexo / Raça</th><th class="col-num">Cabeças</th><th>Origem</th><th>Destino</th><th>Proprietário</th><th>Trava</th><th>Responsável</th><th>Status</th></tr></thead>
+                        <tbody id="tbody-ocs"><tr><td class="celula-vazia" colspan="11">Carregando...</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="tabela-rodape"><span id="contagem-ocs"></span></div>
+            </section>
+        </section>
+
+        <!-- Cadastros -->
+        <section id="aba-cadastros" class="painel" hidden>
+            <div class="pagina-cabecalho">
+                <div>
+                    <h1 class="pagina-titulo">Cadastros</h1>
+                    <p class="pagina-descricao">Listas que aparecem como sugestão ou opção no formulário. Um item por linha.</p>
+                </div>
+            </div>
+            <div id="grade-cadastros" class="grade-cadastros"></div>
+        </section>
+
+        <!-- Usuários -->
+        <section id="aba-usuarios" class="painel" hidden>
+            <div class="pagina-cabecalho">
+                <div>
+                    <h1 class="pagina-titulo">Usuários</h1>
+                    <p class="pagina-descricao">Crie acessos, troque perfis, redefina senhas e desative quem não usa mais o sistema.</p>
+                </div>
+            </div>
+            <form id="form-usuario" class="card">
+                <h2 class="card-titulo">Novo usuário</h2>
+                <div class="form-grid grade-usuario">
+                    <div class="form-group">
+                        <label for="u-nome">Nome completo</label>
+                        <input id="u-nome" required minlength="3" maxlength="100" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label for="u-login">Usuário</label>
+                        <input id="u-login" readonly tabindex="-1" placeholder="gerado pelo nome">
+                    </div>
+                    <div class="form-group">
+                        <label for="u-perfil">Perfil</label>
+                        <select id="u-perfil" required>
+                            <option value="solicitante">Solicitante</option>
+                            <option value="analista">Analista</option>
+                        </select>
+                    </div>
+                    <div class="form-group form-group-botao">
+                        <button id="btn-criar-usuario" class="btn btn-primario" type="submit">Criar usuário</button>
+                    </div>
+                </div>
+            </form>
+            <div id="senha-temporaria" class="aviso aviso-sucesso" role="status" hidden></div>
+            <section class="card card-tabela">
+                <div class="tabela-wrap">
+                    <table>
+                        <thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Situação</th><th></th></tr></thead>
+                        <tbody id="tbody-usuarios"><tr><td class="celula-vazia" colspan="5">Carregando...</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+        </section>
+    </main>
+
+    <!-- Análise de uma solicitação -->
+    <dialog id="dialogo-analise" class="dialogo">
+        <form method="dialog" class="dialogo-corpo" id="form-analise">
+            <div class="dialogo-cabecalho">
+                <h2 class="card-titulo">Analisar solicitação</h2>
+                <button class="btn btn-fantasma btn-sm" value="fechar" aria-label="Fechar">
+                    <svg class="icon"><use href="../assets/img/icones.svg#fechar"></use></svg>
+                </button>
+            </div>
+            <dl id="resumo-solicitacao" class="resumo"></dl>
+
+            <h3 class="subtitulo-secao">Gerar OC</h3>
+            <div class="form-grid grade-3">
+                <div class="form-group">
+                    <label for="a-trava">Trava</label>
+                    <div class="opcoes" id="a-trava" role="radiogroup" data-nome="trava"></div>
+                </div>
+            </div>
+            <div class="origens-cabecalho">
+                <span class="rotulo">Origens</span>
+                <button type="button" id="btn-add-origem" class="btn btn-secundario btn-sm">
+                    <svg class="icon"><use href="../assets/img/icones.svg#mais"></use></svg>Adicionar origem
+                </button>
+            </div>
+            <div id="lista-origens-oc" class="origens"></div>
+            <p class="ajuda" id="total-origens"></p>
+            <p id="erro-analise" class="erro-form" role="alert"></p>
+            <div class="form-acoes">
+                <button type="button" id="btn-gerar-oc" class="btn btn-primario">Gerar OC</button>
+            </div>
+
+            <h3 class="subtitulo-secao">Ou devolva ao solicitante</h3>
+            <div class="form-group">
+                <label for="a-mensagem">Mensagem (obrigatória para ajuste ou recusa)</label>
+                <textarea id="a-mensagem" maxlength="1000" placeholder="Ex.: confirmar a fazenda de destino"></textarea>
+            </div>
+            <div class="form-acoes">
+                <button type="button" id="btn-pedir-ajuste" class="btn btn-secundario">Pedir ajuste</button>
+                <button type="button" id="btn-recusar" class="btn btn-perigo">Recusar</button>
+            </div>
+        </form>
+    </dialog>
+
+    <datalist id="lista-origens"></datalist>
+    <datalist id="lista-fazendas"></datalist>
+
+    <script type="module" src="../js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,623 @@
+import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {
+    collection, doc, getDoc, onSnapshot, query, where, addDoc, updateDoc, setDoc, runTransaction, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { auth, db } from "./firebase.js";
+import { chamarConta } from "./contas-api.js";
+import { TIPOS, SEXOS, PROPRIETARIOS, TRAVAS, STATUS_OC, LISTAS_PADRAO, NOMES_LISTAS, SITUACOES, CLASSE_STATUS_OC } from "./listas.js";
+import { escapar, formatarData, formatarNumero, formatarPreco, lerNumero, hojeIso, compararNomes, contemTermos, sugerirLogin } from "./util.js";
+
+const $ = id => document.getElementById(id);
+const estado = {
+    usuario: null,
+    listas: { ...LISTAS_PADRAO },
+    minhas: [], minhasOcs: new Map(),
+    analise: [], ocs: [], usuarios: [],
+    editando: null,      // solicitação em correção (status "ajuste")
+    analisando: null     // solicitação aberta no diálogo de análise
+};
+const cancelamentos = [];
+const ehAnalista = () => estado.usuario?.perfil === 'analista';
+const dataDe = ts => ts?.toDate ? ts.toDate().toLocaleDateString('sv-SE') : '';
+const tag = (texto, classe = '') => `<span class="tag ${classe}">${escapar(texto)}</span>`;
+const vazio = (tbody, colunas, texto) => { $(tbody).innerHTML = `<tr><td class="celula-vazia" colspan="${colunas}">${escapar(texto)}</td></tr>`; };
+
+function falhar(error) {
+    console.error(error);
+    if (error?.code === 'permission-denied') {
+        alert('Seu acesso mudou ou expirou. Entre novamente.');
+        sair();
+    }
+}
+
+async function sair() {
+    cancelamentos.splice(0).forEach(c => c());
+    await signOut(auth).catch(() => {});
+    location.href = '../index.html';
+}
+$('btn-sair').onclick = sair;
+
+// ---------------------------------------------------------------------------
+// Sessão
+// ---------------------------------------------------------------------------
+if (!auth) location.href = '../index.html';
+else onAuthStateChanged(auth, async user => {
+    if (!user) { location.href = '../index.html'; return; }
+    try {
+        const snap = await getDoc(doc(db, 'usuarios', user.uid));
+        const perfil = snap.exists() ? snap.data() : null;
+        if (!perfil || !['solicitante', 'analista'].includes(perfil.perfil) || perfil.ativo === false) {
+            alert('Acesso não liberado. Fale com o analista.');
+            return sair();
+        }
+        if (perfil.trocaSenhaObrigatoria) { location.href = 'trocar-senha.html'; return; }
+        estado.usuario = { ...perfil, uid: user.uid };
+        iniciar();
+    } catch (error) {
+        console.error(error);
+        alert('Não foi possível verificar seu acesso. Entre novamente.');
+        sair();
+    }
+});
+
+function iniciar() {
+    const u = estado.usuario;
+    $('nome-usuario').textContent = u.nome;
+    $('perfil-usuario').textContent = u.perfil === 'analista' ? 'Analista' : 'Solicitante';
+    document.querySelectorAll('[data-analista]').forEach(el => { el.hidden = !ehAnalista(); });
+    document.querySelector('.abas').hidden = false;
+    $('carregando').hidden = true;
+
+    montarFormulario();
+    cancelamentos.push(onSnapshot(collection(db, 'listas'), snap => {
+        snap.forEach(d => { if (Array.isArray(d.data().itens)) estado.listas[d.id] = d.data().itens; });
+        atualizarListas();
+    }, falhar));
+    cancelamentos.push(onSnapshot(query(collection(db, 'solicitacoes'), where('criadoPor', '==', u.uid)), snap => {
+        estado.minhas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderMinhas();
+    }, falhar));
+    cancelamentos.push(onSnapshot(query(collection(db, 'ocs'), where('criadoPor', '==', u.uid)), snap => {
+        estado.minhasOcs = new Map(snap.docs.map(d => [d.data().numero, d.data()]));
+        renderMinhas();
+    }, falhar));
+
+    if (ehAnalista()) {
+        cancelamentos.push(onSnapshot(query(collection(db, 'solicitacoes'), where('status', '==', 'aguardando')), snap => {
+            estado.analise = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            renderAnalise();
+        }, falhar));
+        cancelamentos.push(onSnapshot(collection(db, 'ocs'), snap => {
+            estado.ocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            renderOcs();
+        }, falhar));
+        cancelamentos.push(onSnapshot(collection(db, 'usuarios'), snap => {
+            estado.usuarios = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+            renderUsuarios();
+        }, falhar));
+        montarOcs();
+        montarCadastros();
+        montarUsuarios();
+    }
+
+    const inicial = location.hash.slice(1);
+    mostrarAba(document.querySelector(`.aba[data-aba="${inicial}"]:not([hidden])`) ? inicial : (ehAnalista() ? 'analise' : 'nova'));
+}
+
+// ---------------------------------------------------------------------------
+// Abas
+// ---------------------------------------------------------------------------
+function mostrarAba(nome) {
+    document.querySelectorAll('.aba').forEach(b => {
+        const ativa = b.dataset.aba === nome;
+        b.classList.toggle('ativa', ativa);
+        b.setAttribute('aria-current', ativa ? 'page' : 'false');
+    });
+    document.querySelectorAll('.painel').forEach(p => { p.hidden = p.id !== 'aba-' + nome; });
+    // A senha temporária só fica na tela enquanto a aba Usuários estiver aberta.
+    if (nome !== 'usuarios') { $('senha-temporaria').hidden = true; $('senha-temporaria').innerHTML = ''; }
+    history.replaceState(null, '', '#' + nome);
+}
+document.querySelectorAll('.aba').forEach(b => b.addEventListener('click', () => mostrarAba(b.dataset.aba)));
+
+// Grupo de botões de escolha única (Tipo, Sexo, Proprietário, Trava)
+function criarOpcoes(container, valores, aoMudar = () => {}) {
+    container.innerHTML = valores.map(v => `<button type="button" class="opcao" role="radio" aria-checked="false" data-valor="${escapar(v)}">${escapar(v)}</button>`).join('');
+    const definir = valor => {
+        container.dataset.valor = valor || '';
+        container.querySelectorAll('.opcao').forEach(b => b.setAttribute('aria-checked', String(b.dataset.valor === valor)));
+        container.classList.remove('campo-invalido');
+        aoMudar(valor);
+    };
+    container.querySelectorAll('.opcao').forEach(b => b.addEventListener('click', () => definir(b.dataset.valor)));
+    container.definir = definir;
+    definir('');
+}
+
+function preencherSelect(select, itens, rotuloVazio = 'Selecione...') {
+    const atual = select.value;
+    select.innerHTML = `<option value="">${rotuloVazio}</option>` + itens.map(i => `<option>${escapar(i)}</option>`).join('');
+    if (atual && !itens.includes(atual)) select.insertAdjacentHTML('beforeend', `<option>${escapar(atual)}</option>`);
+    select.value = atual;
+}
+
+function atualizarListas() {
+    const ordenar = l => [...l].sort(compararNomes);
+    preencherSelect($('f-raca'), ordenar(estado.listas.racas));
+    preencherSelect($('f-responsavel'), ordenar(estado.listas.responsaveis));
+    $('lista-origens').innerHTML = ordenar(estado.listas.origens).map(i => `<option value="${escapar(i)}">`).join('');
+    $('lista-fazendas').innerHTML = ordenar(estado.listas.fazendas).map(i => `<option value="${escapar(i)}">`).join('');
+    if (ehAnalista()) renderCadastros();
+}
+
+// ---------------------------------------------------------------------------
+// Nova solicitação / correção
+// ---------------------------------------------------------------------------
+const CAMPOS_TEXTO = ['raca', 'origem', 'destino', 'dataPrevista', 'solicitante', 'responsavel', 'telefone', 'observacao'];
+const campo = nome => $('form-solicitacao').elements[nome];
+
+function montarFormulario() {
+    criarOpcoes($('f-tipo'), TIPOS, valor => {
+        $('grupo-preco').hidden = valor !== 'Compra';
+        if (valor !== 'Compra') $('f-preco').value = '';
+    });
+    criarOpcoes($('f-sexo'), SEXOS);
+    criarOpcoes($('f-proprietario'), PROPRIETARIOS);
+    $('f-solicitante').value = estado.usuario.nome;
+    $('form-solicitacao').addEventListener('submit', enviarSolicitacao);
+    $('btn-cancelar-ajuste').onclick = limparFormulario;
+}
+
+function limparFormulario() {
+    estado.editando = null;
+    $('form-solicitacao').reset();
+    ['f-tipo', 'f-sexo', 'f-proprietario'].forEach(id => $(id).definir(''));
+    $('f-solicitante').value = estado.usuario.nome;
+    $('titulo-form').textContent = 'Nova solicitação';
+    $('btn-enviar').textContent = 'Enviar solicitação';
+    $('btn-cancelar-ajuste').hidden = true;
+    $('aviso-ajuste').hidden = true;
+    $('erro-solicitacao').textContent = '';
+    document.querySelectorAll('.campo-invalido').forEach(el => el.classList.remove('campo-invalido'));
+}
+
+function editarSolicitacao(id) {
+    const s = estado.minhas.find(x => x.id === id);
+    if (!s) return;
+    limparFormulario();
+    estado.editando = s;
+    $('f-tipo').definir(s.tipo);
+    $('f-sexo').definir(s.sexo);
+    $('f-proprietario').definir(s.proprietario);
+    CAMPOS_TEXTO.forEach(n => { campo(n).value = s[n] ?? ''; });
+    campo('quantidade').value = s.quantidade ?? '';
+    $('f-preco').value = s.preco != null ? formatarPreco(s.preco) : '';
+    $('titulo-form').textContent = 'Corrigir solicitação';
+    $('btn-enviar').textContent = 'Reenviar para análise';
+    $('btn-cancelar-ajuste').hidden = false;
+    $('aviso-ajuste').hidden = false;
+    $('aviso-ajuste').innerHTML = `<div><strong>O analista pediu ajuste:</strong> ${escapar(s.mensagemAnalista || '')}</div>`;
+    mostrarAba('nova');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function lerFormulario() {
+    const erros = [];
+    const marcar = (el, ok) => { el.classList.toggle('campo-invalido', !ok); if (!ok) erros.push(el); };
+    const dados = {
+        tipo: $('f-tipo').dataset.valor, sexo: $('f-sexo').dataset.valor, proprietario: $('f-proprietario').dataset.valor
+    };
+    marcar($('f-tipo'), TIPOS.includes(dados.tipo));
+    marcar($('f-sexo'), SEXOS.includes(dados.sexo));
+    marcar($('f-proprietario'), PROPRIETARIOS.includes(dados.proprietario));
+    CAMPOS_TEXTO.forEach(n => { dados[n] = campo(n).value.trim(); });
+    ['raca', 'origem', 'destino', 'dataPrevista', 'solicitante', 'responsavel'].forEach(n => marcar(campo(n), dados[n].length > 0));
+    const quantidade = Number(campo('quantidade').value);
+    marcar(campo('quantidade'), Number.isInteger(quantidade) && quantidade > 0);
+    dados.quantidade = quantidade;
+    dados.preco = null;
+    if (dados.tipo === 'Compra') {
+        const preco = lerNumero($('f-preco').value);
+        marcar($('f-preco'), preco !== null && preco > 0);
+        dados.preco = preco;
+    }
+    return { dados, erros };
+}
+
+let enviando = false;
+async function enviarSolicitacao(e) {
+    e.preventDefault();
+    if (enviando) return;
+    const { dados, erros } = lerFormulario();
+    if (erros.length) {
+        $('erro-solicitacao').textContent = 'Preencha os campos destacados.';
+        erros[0].focus?.();
+        return;
+    }
+    $('erro-solicitacao').textContent = '';
+    enviando = true;
+    $('btn-enviar').disabled = true;
+    try {
+        if (estado.editando) {
+            await updateDoc(doc(db, 'solicitacoes', estado.editando.id), { ...dados, status: 'aguardando', atualizadoEm: serverTimestamp() });
+        } else {
+            await addDoc(collection(db, 'solicitacoes'), {
+                ...dados, status: 'aguardando', mensagemAnalista: '',
+                criadoPor: estado.usuario.uid, criadoPorNome: estado.usuario.nome,
+                criadoEm: serverTimestamp(), atualizadoEm: serverTimestamp()
+            });
+        }
+        limparFormulario();
+        mostrarAba('minhas');
+    } catch (error) {
+        console.error(error);
+        $('erro-solicitacao').textContent = 'Não foi possível enviar. Confira a conexão e tente novamente.';
+    } finally {
+        enviando = false;
+        $('btn-enviar').disabled = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Minhas solicitações
+// ---------------------------------------------------------------------------
+function renderMinhas() {
+    const lista = [...estado.minhas].sort((a, b) => (b.criadoEm?.seconds ?? Infinity) - (a.criadoEm?.seconds ?? Infinity));
+    if (!lista.length) return vazio('tbody-minhas', 8, 'Você ainda não enviou solicitações.');
+    $('tbody-minhas').innerHTML = lista.map(s => {
+        const situacao = SITUACOES[s.status] || { texto: s.status, classe: '' };
+        const oc = s.ocNumero ? estado.minhasOcs.get(s.ocNumero) : null;
+        const detalhe = ['ajuste', 'recusada'].includes(s.status) && s.mensagemAnalista
+            ? `<span class="motivo">${escapar(s.mensagemAnalista)}</span>` : '';
+        return `<tr>
+            <td class="col-data"><strong>${formatarData(dataDe(s.criadoEm))}</strong></td>
+            <td>${escapar(s.tipo)}</td>
+            <td class="col-num">${formatarNumero(s.quantidade)}</td>
+            <td>${escapar(s.origem)} → ${escapar(s.destino)}</td>
+            <td>${tag(situacao.texto, situacao.classe)}${detalhe}</td>
+            <td>${s.ocNumero ? `<strong>${s.ocNumero}</strong>` : '—'}</td>
+            <td>${oc ? tag(oc.status, CLASSE_STATUS_OC[oc.status]) : '—'}</td>
+            <td><div class="acoes-linha">${s.status === 'ajuste' ? `<button class="btn btn-primario btn-sm" data-corrigir="${s.id}">Corrigir</button>` : ''}</div></td>
+        </tr>`;
+    }).join('');
+    $('tbody-minhas').querySelectorAll('[data-corrigir]').forEach(b => b.onclick = () => editarSolicitacao(b.dataset.corrigir));
+}
+
+// ---------------------------------------------------------------------------
+// Análise (analista)
+// ---------------------------------------------------------------------------
+function renderAnalise() {
+    const n = estado.analise.length;
+    $('contagem-analise').hidden = n === 0;
+    $('contagem-analise').textContent = n;
+    if (!n) return vazio('tbody-analise', 8, 'Nenhuma solicitação aguardando análise.');
+    const lista = [...estado.analise].sort((a, b) => (a.atualizadoEm?.seconds ?? 0) - (b.atualizadoEm?.seconds ?? 0));
+    $('tbody-analise').innerHTML = lista.map(s => `<tr>
+        <td class="col-data"><strong>${formatarData(dataDe(s.criadoEm))}</strong></td>
+        <td>${escapar(s.solicitante)}</td>
+        <td>${escapar(s.tipo)}</td>
+        <td>${escapar(s.sexo)} · ${escapar(s.raca)}</td>
+        <td class="col-num">${formatarNumero(s.quantidade)}</td>
+        <td>${escapar(s.origem)} → ${escapar(s.destino)}</td>
+        <td>${formatarData(s.dataPrevista)}</td>
+        <td><div class="acoes-linha"><button class="btn btn-primario btn-sm" data-analisar="${s.id}">Analisar</button></div></td>
+    </tr>`).join('');
+    $('tbody-analise').querySelectorAll('[data-analisar]').forEach(b => b.onclick = () => abrirAnalise(b.dataset.analisar));
+}
+
+function linhaOrigem(o = {}) {
+    const div = document.createElement('div');
+    div.className = 'origem-linha';
+    div.innerHTML = `
+        <div class="form-group"><label>Origem</label><input data-o="origem" list="lista-origens" autocomplete="off" value="${escapar(o.origem ?? '')}"></div>
+        <div class="form-group"><label>Quantidade</label><input data-o="quantidade" type="number" min="1" step="1" inputmode="numeric" value="${o.quantidade ?? ''}"></div>
+        <div class="form-group"><label>Sequência</label><input data-o="sequencia" placeholder="1 a 50" value="${escapar(o.sequencia ?? '')}"></div>
+        <div class="form-group"><label>R$/@</label><input data-o="preco" inputmode="decimal" placeholder="0,00" value="${o.preco != null ? formatarPreco(o.preco) : ''}"></div>
+        <button type="button" class="btn btn-fantasma" aria-label="Remover origem"><svg class="icon"><use href="../assets/img/icones.svg#fechar"></use></svg></button>`;
+    div.querySelector('button').onclick = () => {
+        if ($('lista-origens-oc').children.length > 1) { div.remove(); atualizarTotalOrigens(); }
+    };
+    div.querySelector('[data-o="quantidade"]').addEventListener('input', atualizarTotalOrigens);
+    $('lista-origens-oc').appendChild(div);
+}
+
+function atualizarTotalOrigens() {
+    const total = [...$('lista-origens-oc').querySelectorAll('[data-o="quantidade"]')].reduce((s, i) => s + (Number(i.value) || 0), 0);
+    const pedido = estado.analisando?.quantidade ?? 0;
+    $('total-origens').textContent = `Total das origens: ${formatarNumero(total)} cabeças` + (total !== pedido ? ` (solicitado: ${formatarNumero(pedido)})` : '');
+}
+
+function abrirAnalise(id) {
+    const s = estado.analise.find(x => x.id === id);
+    if (!s) return;
+    estado.analisando = s;
+    const item = (rotulo, valor, largo = false) => `<div${largo ? ' class="largo"' : ''}><dt>${rotulo}</dt><dd>${escapar(valor) || '—'}</dd></div>`;
+    $('resumo-solicitacao').innerHTML = [
+        item('Tipo', s.tipo), item('Sexo', s.sexo), item('Raça', s.raca),
+        item('Cabeças', formatarNumero(s.quantidade)), item('Origem', s.origem), item('Destino', s.destino),
+        item('Proprietário', s.proprietario), item('Data prevista', formatarData(s.dataPrevista)), item('Preço R$/@', s.preco != null ? formatarPreco(s.preco) : ''),
+        item('Solicitante', s.solicitante), item('Responsável', s.responsavel), item('Telefone', s.telefone),
+        item('Observação', s.observacao, true)
+    ].join('');
+    criarOpcoes($('a-trava'), TRAVAS);
+    $('lista-origens-oc').innerHTML = '';
+    linhaOrigem({ origem: s.origem, quantidade: s.quantidade, sequencia: `1 a ${s.quantidade}`, preco: s.preco });
+    atualizarTotalOrigens();
+    $('a-mensagem').value = '';
+    $('erro-analise').textContent = '';
+    $('dialogo-analise').showModal();
+}
+$('btn-add-origem').onclick = () => { linhaOrigem(); atualizarTotalOrigens(); };
+
+function lerOrigens() {
+    const origens = [];
+    for (const linha of $('lista-origens-oc').children) {
+        const valor = n => linha.querySelector(`[data-o="${n}"]`);
+        const o = {
+            origem: valor('origem').value.trim(),
+            quantidade: Number(valor('quantidade').value),
+            sequencia: valor('sequencia').value.trim(),
+            preco: lerNumero(valor('preco').value)
+        };
+        const ok = o.origem && Number.isInteger(o.quantidade) && o.quantidade > 0 && !Number.isNaN(o.preco);
+        linha.querySelectorAll('input').forEach(i => i.classList.remove('campo-invalido'));
+        if (!ok) {
+            if (!o.origem) valor('origem').classList.add('campo-invalido');
+            if (!(Number.isInteger(o.quantidade) && o.quantidade > 0)) valor('quantidade').classList.add('campo-invalido');
+            if (Number.isNaN(o.preco)) valor('preco').classList.add('campo-invalido');
+            return null;
+        }
+        origens.push(o);
+    }
+    return origens;
+}
+
+const assinaturaAnalise = () => ({ analisadoPor: estado.usuario.uid, analisadoPorNome: estado.usuario.nome, analisadoEm: serverTimestamp() });
+
+let analisando = false;
+async function comBloqueio(acao) {
+    if (analisando) return;
+    analisando = true;
+    document.querySelectorAll('#form-analise .form-acoes .btn').forEach(b => { b.disabled = true; });
+    try { await acao(); }
+    catch (error) {
+        console.error(error);
+        $('erro-analise').textContent = error.message?.startsWith('Esta solicitação') ? error.message : 'Não foi possível concluir. Tente novamente.';
+    } finally {
+        analisando = false;
+        document.querySelectorAll('#form-analise .form-acoes .btn').forEach(b => { b.disabled = false; });
+    }
+}
+
+$('btn-gerar-oc').onclick = () => comBloqueio(async () => {
+    const s = estado.analisando;
+    const trava = $('a-trava').dataset.valor;
+    $('erro-analise').textContent = '';
+    if (!TRAVAS.includes(trava)) { $('a-trava').classList.add('campo-invalido'); $('erro-analise').textContent = 'Escolha se o gado será travado antes de gerar a OC.'; return; }
+    const origens = lerOrigens();
+    if (!origens) { $('erro-analise').textContent = 'Confira as origens destacadas.'; return; }
+    const quantidade = origens.reduce((t, o) => t + o.quantidade, 0);
+    if (quantidade !== s.quantidade && !confirm(`O total das origens (${quantidade}) é diferente do solicitado (${s.quantidade}). Gerar a OC com ${quantidade} cabeças?`)) return;
+
+    const numero = await runTransaction(db, async t => {
+        const refSol = doc(db, 'solicitacoes', s.id);
+        const refContador = doc(db, 'config', 'contador');
+        const [sol, contador] = await Promise.all([t.get(refSol), t.get(refContador)]);
+        if (sol.data()?.status !== 'aguardando') throw new Error('Esta solicitação já foi analisada por outra pessoa.');
+        let n = contador.data()?.proxima;
+        if (!Number.isInteger(n)) throw new Error('Contador de OCs não configurado (config/contador).');
+        // Próximo número livre: pula números que já existam (ex.: OCs importadas).
+        while ((await t.get(doc(db, 'ocs', String(n)))).exists()) n++;
+        t.set(doc(db, 'ocs', String(n)), {
+            numero: n, dataEmissao: hojeIso(), status: 'Pendente', trava,
+            tipo: s.tipo, sexo: s.sexo, raca: s.raca, quantidade, origens,
+            destino: s.destino, proprietario: s.proprietario, dataPrevista: s.dataPrevista,
+            observacao: s.observacao || '', telefone: s.telefone || '',
+            solicitante: s.solicitante, responsavel: s.responsavel,
+            criadoPor: s.criadoPor, solicitacaoId: s.id,
+            geradaPor: estado.usuario.uid, geradaPorNome: estado.usuario.nome, geradaEm: serverTimestamp()
+        });
+        t.update(refContador, { proxima: n + 1 });
+        t.update(refSol, { status: 'gerada', ocNumero: n, mensagemAnalista: '', ...assinaturaAnalise() });
+        return n;
+    });
+    $('dialogo-analise').close();
+    alert(`OC ${numero} gerada com status Pendente.`);
+});
+
+async function devolver(status) {
+    const mensagem = $('a-mensagem').value.trim();
+    if (!mensagem) {
+        $('a-mensagem').classList.add('campo-invalido');
+        $('erro-analise').textContent = status === 'ajuste' ? 'Escreva o que precisa ser ajustado.' : 'Informe o motivo da recusa.';
+        $('a-mensagem').focus();
+        return;
+    }
+    $('a-mensagem').classList.remove('campo-invalido');
+    if (status === 'recusada' && !confirm('Recusar esta solicitação?')) return;
+    await updateDoc(doc(db, 'solicitacoes', estado.analisando.id), { status, mensagemAnalista: mensagem, ...assinaturaAnalise() });
+    $('dialogo-analise').close();
+}
+$('btn-pedir-ajuste').onclick = () => comBloqueio(() => devolver('ajuste'));
+$('btn-recusar').onclick = () => comBloqueio(() => devolver('recusada'));
+
+// ---------------------------------------------------------------------------
+// Ordens de compra (analista)
+// ---------------------------------------------------------------------------
+function montarOcs() {
+    $('filtro-status').insertAdjacentHTML('beforeend', STATUS_OC.map(s => `<option>${s}</option>`).join(''));
+    $('filtro-tipo').insertAdjacentHTML('beforeend', TIPOS.map(s => `<option>${s}</option>`).join(''));
+    ['busca-ocs', 'filtro-status', 'filtro-tipo'].forEach(id => $(id).addEventListener('input', renderOcs));
+    $('btn-exportar').onclick = exportarCsv;
+}
+
+const textoOrigens = oc => (oc.origens || []).map(o => o.origem).filter(Boolean).join(', ');
+function ocsFiltradas() {
+    const busca = $('busca-ocs').value, status = $('filtro-status').value, tipo = $('filtro-tipo').value;
+    return estado.ocs
+        .filter(oc => (!status || oc.status === status) && (!tipo || oc.tipo === tipo)
+            && contemTermos([oc.numero, textoOrigens(oc), oc.destino, oc.responsavel, oc.solicitante, oc.raca, oc.sexo, oc.proprietario].join(' '), busca))
+        .sort((a, b) => b.numero - a.numero);
+}
+
+function renderOcs() {
+    const contagem = Object.fromEntries(STATUS_OC.map(s => [s, 0]));
+    estado.ocs.forEach(oc => { if (oc.status in contagem) contagem[oc.status]++; });
+    $('indicadores-ocs').innerHTML = STATUS_OC.map(s => `<div class="indicador"><span class="indicador-rotulo">${s}</span><span class="indicador-valor">${formatarNumero(contagem[s])}</span></div>`).join('');
+
+    const lista = ocsFiltradas();
+    $('contagem-ocs').textContent = `${formatarNumero(lista.length)} de ${formatarNumero(estado.ocs.length)} OCs`;
+    if (!lista.length) return vazio('tbody-ocs', 11, estado.ocs.length ? 'Nenhuma OC encontrada com esses filtros.' : 'Nenhuma OC cadastrada.');
+    $('tbody-ocs').innerHTML = lista.map(oc => `<tr>
+        <td class="col-num"><strong>${oc.numero}</strong></td>
+        <td>${formatarData(oc.dataEmissao)}</td>
+        <td>${escapar(oc.tipo)}</td>
+        <td>${escapar(oc.sexo)}${oc.raca ? ' · ' + escapar(oc.raca) : ''}</td>
+        <td class="col-num">${formatarNumero(oc.quantidade)}</td>
+        <td><span class="texto-cortado" title="${escapar(textoOrigens(oc))}">${escapar(textoOrigens(oc))}</span></td>
+        <td>${escapar(oc.destino)}</td>
+        <td>${escapar(oc.proprietario)}</td>
+        <td>${escapar(oc.trava || '—')}</td>
+        <td>${escapar(oc.responsavel)}</td>
+        <td><select class="select-status" data-oc="${escapar(oc.id)}" aria-label="Status da OC ${oc.numero}">
+            ${STATUS_OC.map(s => `<option${s === oc.status ? ' selected' : ''}>${s}</option>`).join('')}
+        </select></td>
+    </tr>`).join('');
+    $('tbody-ocs').querySelectorAll('[data-oc]').forEach(sel => sel.onchange = async () => {
+        const oc = estado.ocs.find(o => o.id === sel.dataset.oc);
+        if (!confirm(`Mudar a OC ${oc.numero} de ${oc.status} para ${sel.value}?`)) { sel.value = oc.status; return; }
+        try {
+            await updateDoc(doc(db, 'ocs', oc.id), { status: sel.value, statusAtualizadoPor: estado.usuario.uid, statusAtualizadoPorNome: estado.usuario.nome, statusAtualizadoEm: serverTimestamp() });
+        } catch (error) { console.error(error); sel.value = oc.status; alert('Não foi possível mudar o status.'); }
+    });
+}
+
+function exportarCsv() {
+    const colunas = ['OC', 'Data', 'Tipo', 'Sexo', 'Raça', 'Quantidade', 'Origem', 'Qtd. origem', 'Sequência', 'R$/@', 'Destino', 'Proprietário', 'Data prevista', 'Trava', 'Status', 'Solicitante', 'Responsável', 'Observação', 'Telefone'];
+    const celula = v => { const t = String(v ?? ''); return /[";\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    const linhas = [];
+    for (const oc of ocsFiltradas().reverse()) {
+        const origens = oc.origens?.length ? oc.origens : [{}];
+        for (const o of origens) {
+            linhas.push([oc.numero, formatarData(oc.dataEmissao), oc.tipo, oc.sexo, oc.raca, oc.quantidade, o.origem, o.quantidade, o.sequencia,
+                o.preco != null ? formatarPreco(o.preco) : '', oc.destino, oc.proprietario, formatarData(oc.dataPrevista), oc.trava, oc.status,
+                oc.solicitante, oc.responsavel, oc.observacao, oc.telefone].map(celula).join(';'));
+        }
+    }
+    // BOM + ";" para o Excel em português abrir com acentos e colunas certas
+    const blob = new Blob(['﻿' + [colunas.join(';'), ...linhas].join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `ordens-de-compra-${hojeIso()}.csv` });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ---------------------------------------------------------------------------
+// Cadastros (analista)
+// ---------------------------------------------------------------------------
+function montarCadastros() {
+    $('grade-cadastros').innerHTML = Object.entries(NOMES_LISTAS).map(([id, nome]) => `
+        <form class="card" data-lista="${id}">
+            <div class="card-cabecalho"><div><h2 class="card-titulo">${nome}</h2><p class="card-subtitulo" data-contagem></p></div>
+            <button class="btn btn-primario btn-sm" type="submit">Salvar</button></div>
+            <div class="form-group"><label class="sr-only" for="lista-${id}">${nome}</label><textarea id="lista-${id}" spellcheck="false"></textarea></div>
+            <p class="ajuda" data-status role="status"></p>
+        </form>`).join('');
+    $('grade-cadastros').querySelectorAll('form').forEach(form => {
+        const area = form.querySelector('textarea');
+        area.addEventListener('input', () => { form.dataset.alterado = '1'; });
+        form.addEventListener('submit', async e => {
+            e.preventDefault();
+            const itens = [...new Set(area.value.split('\n').map(l => l.trim()).filter(Boolean))].sort(compararNomes);
+            const status = form.querySelector('[data-status]');
+            try {
+                await setDoc(doc(db, 'listas', form.dataset.lista), { itens, atualizadoPor: estado.usuario.uid, atualizadoEm: serverTimestamp() });
+                delete form.dataset.alterado;
+                status.textContent = 'Salvo.';
+            } catch (error) { console.error(error); status.textContent = 'Não foi possível salvar.'; }
+        });
+    });
+}
+
+function renderCadastros() {
+    $('grade-cadastros').querySelectorAll('form').forEach(form => {
+        const itens = estado.listas[form.dataset.lista] || [];
+        form.querySelector('[data-contagem]').textContent = `${itens.length} ${itens.length === 1 ? 'item' : 'itens'}`;
+        if (!form.dataset.alterado) form.querySelector('textarea').value = [...itens].sort(compararNomes).join('\n');
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Usuários (analista)
+// ---------------------------------------------------------------------------
+function mostrarSenhaTemporaria(login, senha, acao) {
+    const aviso = $('senha-temporaria');
+    aviso.hidden = false;
+    aviso.innerHTML = `<div>${acao} <strong>${escapar(login)}</strong>. Senha temporária: <span class="senha-codigo">${escapar(senha)}</span>
+        <br>Passe para a pessoa; no primeiro acesso ela vai trocar por uma senha própria. A senha não fica salva e some ao sair desta aba.</div>
+        <button type="button" class="btn btn-fantasma btn-sm" aria-label="Fechar aviso"><svg class="icon"><use href="../assets/img/icones.svg#fechar"></use></svg></button>`;
+    aviso.querySelector('button').onclick = () => { aviso.hidden = true; aviso.innerHTML = ''; };
+}
+
+function montarUsuarios() {
+    $('u-nome').addEventListener('input', () => { $('u-login').value = sugerirLogin($('u-nome').value); });
+    $('form-usuario').addEventListener('submit', async e => {
+        e.preventDefault();
+        const nome = $('u-nome').value.trim(), login = sugerirLogin(nome), perfil = $('u-perfil').value;
+        if (!login) { alert('Informe nome e sobrenome para gerar o usuário.'); return; }
+        const botao = $('btn-criar-usuario');
+        botao.disabled = true;
+        try {
+            const r = await chamarConta('criarConta', { nome, login, perfil });
+            e.target.reset();
+            mostrarSenhaTemporaria(r.login, r.senhaTemporaria, 'Usuário criado:');
+        } catch (error) { alert(error.message); }
+        finally { botao.disabled = false; }
+    });
+}
+
+function renderUsuarios() {
+    const lista = [...estado.usuarios].sort((a, b) => compararNomes(a.nome, b.nome));
+    if (!lista.length) return vazio('tbody-usuarios', 5, 'Nenhum usuário.');
+    const eu = estado.usuario.uid;
+    $('tbody-usuarios').innerHTML = lista.map(u => {
+        const proprio = u.uid === eu;
+        const situacao = u.ativo === false ? tag('Desativado', 'tag-perigo')
+            : u.trocaSenhaObrigatoria ? tag('Troca de senha pendente', 'tag-alerta') : tag('Ativo', 'tag-verde');
+        return `<tr>
+            <td><strong>${escapar(u.nome)}</strong>${proprio ? ' <span class="texto-suave">(você)</span>' : ''}</td>
+            <td>${escapar(u.login)}</td>
+            <td><select class="select-status" data-perfil="${u.uid}" ${proprio ? 'disabled' : ''} aria-label="Perfil de ${escapar(u.nome)}">
+                <option value="solicitante"${u.perfil === 'solicitante' ? ' selected' : ''}>Solicitante</option>
+                <option value="analista"${u.perfil === 'analista' ? ' selected' : ''}>Analista</option>
+            </select></td>
+            <td>${situacao}</td>
+            <td><div class="acoes-linha">${proprio ? '' : `
+                <button class="btn btn-secundario btn-sm" data-redefinir="${u.uid}">Redefinir senha</button>
+                <button class="btn ${u.ativo === false ? 'btn-secundario' : 'btn-perigo'} btn-sm" data-ativo="${u.uid}">${u.ativo === false ? 'Reativar' : 'Desativar'}</button>`}
+            </div></td>
+        </tr>`;
+    }).join('');
+    const achar = uid => estado.usuarios.find(u => u.uid === uid);
+    $('tbody-usuarios').querySelectorAll('[data-perfil]').forEach(sel => sel.onchange = async () => {
+        const u = achar(sel.dataset.perfil);
+        if (!confirm(`Mudar ${u.nome} para ${sel.value === 'analista' ? 'Analista' : 'Solicitante'}?`)) { sel.value = u.perfil; return; }
+        try { await updateDoc(doc(db, 'usuarios', u.uid), { perfil: sel.value }); }
+        catch (error) { console.error(error); sel.value = u.perfil; alert('Não foi possível mudar o perfil.'); }
+    });
+    $('tbody-usuarios').querySelectorAll('[data-ativo]').forEach(b => b.onclick = async () => {
+        const u = achar(b.dataset.ativo), ativar = u.ativo === false;
+        if (!confirm(`${ativar ? 'Reativar' : 'Desativar'} o acesso de ${u.nome}?`)) return;
+        try { await updateDoc(doc(db, 'usuarios', u.uid), { ativo: ativar }); }
+        catch (error) { console.error(error); alert('Não foi possível alterar o acesso.'); }
+    });
+    $('tbody-usuarios').querySelectorAll('[data-redefinir]').forEach(b => b.onclick = async () => {
+        const u = achar(b.dataset.redefinir);
+        if (!confirm(`Redefinir a senha de ${u.nome}? A senha atual deixa de funcionar.`)) return;
+        b.disabled = true;
+        try {
+            const r = await chamarConta('redefinirSenha', { uid: u.uid });
+            mostrarSenhaTemporaria(r.login, r.senhaTemporaria, 'Senha redefinida para');
+        } catch (error) { alert(error.message); }
+        finally { b.disabled = false; }
+    });
+}

@@ -1,0 +1,13 @@
+/* Telas de login e troca de senha: fundo branco, logo no topo */
+body { background: #fff; }
+
+.auth { min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: clamp(40px, 12vh, 120px) 16px 48px; }
+.auth-card { width: 100%; max-width: 380px; }
+.auth-logo { display: block; width: 168px; height: auto; margin: 0 auto 28px; }
+.auth-titulo { text-align: center; font-size: 22px; color: var(--cor-marca); }
+.auth-subtitulo { text-align: center; color: var(--cor-texto-2); margin: 6px 0 28px; }
+.auth-form { display: flex; flex-direction: column; gap: 18px; }
+.auth-form .btn { margin-top: 4px; }
+.auth-rodape { margin-top: 20px; text-align: center; font-size: 13px; color: var(--cor-texto-3); }
+.erro-form { color: var(--perigo-700); font-size: 13px; min-height: 0; }
+.erro-form:empty { display: none; }

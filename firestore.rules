@@ -1,0 +1,124 @@
+rules_version = '2';
+// As permissões de verdade ficam aqui: esconder abas na tela não protege nada.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function logado() { return request.auth != null; }
+    function caminho(colecao, id) { return /databases/$(database)/documents/$(colecao)/$(id); }
+    function eu() { return get(caminho('usuarios', request.auth.uid)).data; }
+    function liberado() {
+      let u = eu();
+      return u.perfil in ['solicitante', 'analista'] && u.get('ativo', true) == true
+        && u.get('trocaSenhaObrigatoria', false) == false
+        && (!('sessaoRevogadaEm' in u) || request.auth.token.get('auth_time', 0) > u.sessaoRevogadaEm);
+    }
+    function ativo() { return logado() && exists(caminho('usuarios', request.auth.uid)) && liberado(); }
+    function analista() { return ativo() && eu().perfil == 'analista'; }
+
+    function texto(v, min, max) { return v is string && v.size() >= min && v.size() <= max; }
+    function camposFormulario() {
+      return ['tipo', 'sexo', 'raca', 'quantidade', 'origem', 'destino', 'proprietario', 'dataPrevista',
+        'preco', 'observacao', 'telefone', 'solicitante', 'responsavel'];
+    }
+    function formularioValido(d) {
+      return d.tipo in ['Compra', 'Transferência', 'Trading']
+        && d.sexo in ['Machos', 'Fêmeas']
+        && d.proprietario in ['Grupo', 'Núcleo IQ']
+        && texto(d.raca, 1, 100) && d.quantidade is int && d.quantidade > 0 && d.quantidade <= 100000
+        && texto(d.origem, 1, 200) && texto(d.destino, 1, 200) && texto(d.dataPrevista, 10, 10)
+        && texto(d.solicitante, 1, 120) && texto(d.responsavel, 1, 120)
+        && texto(d.telefone, 0, 40) && texto(d.observacao, 0, 2000)
+        // O preço só existe em Compra.
+        && ((d.tipo == 'Compra' && d.preco is number && d.preco > 0) || (d.tipo != 'Compra' && d.preco == null));
+    }
+    function assinaturaAnalise(d) {
+      return d.analisadoPor == request.auth.uid && d.analisadoPorNome == eu().nome && d.analisadoEm == request.time;
+    }
+
+    match /usuarios/{uid} {
+      allow read: if logado() && (request.auth.uid == uid || analista());
+      // Criar contas e trocar/redefinir senhas passa pelas Cloud Functions (functions/).
+      // O analista só muda perfil e ativo de outras pessoas, para não se trancar fora.
+      allow update: if analista() && uid != request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['perfil', 'ativo'])
+        && request.resource.data.perfil in ['solicitante', 'analista']
+        && request.resource.data.get('ativo', true) is bool;
+      allow create, delete: if false;
+    }
+
+    match /listas/{nome} {
+      allow read: if ativo();
+      allow write: if analista() && nome in ['fazendas', 'origens', 'racas', 'responsaveis']
+        && request.resource.data.keys().hasOnly(['itens', 'atualizadoPor', 'atualizadoEm'])
+        && request.resource.data.itens is list && request.resource.data.itens.size() <= 3000
+        && request.resource.data.atualizadoPor == request.auth.uid;
+    }
+
+    match /solicitacoes/{id} {
+      allow read: if analista() || (ativo() && resource.data.criadoPor == request.auth.uid);
+
+      allow create: if ativo()
+        && request.resource.data.keys().hasOnly(camposFormulario().concat(['status', 'mensagemAnalista', 'criadoPor', 'criadoPorNome', 'criadoEm', 'atualizadoEm']))
+        && formularioValido(request.resource.data)
+        && request.resource.data.status == 'aguardando' && request.resource.data.mensagemAnalista == ''
+        && request.resource.data.criadoPor == request.auth.uid && request.resource.data.criadoPorNome == eu().nome
+        && request.resource.data.criadoEm == request.time && request.resource.data.atualizadoEm == request.time;
+
+      allow update: if
+        // Solicitante corrige um pedido devolvido para ajuste e reenvia.
+        (ativo() && resource.data.criadoPor == request.auth.uid && resource.data.status == 'ajuste'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(camposFormulario().concat(['status', 'atualizadoEm']))
+          && request.resource.data.status == 'aguardando' && request.resource.data.atualizadoEm == request.time
+          && formularioValido(request.resource.data))
+        // Analista pede ajuste ou recusa, sempre com mensagem.
+        || (analista() && resource.data.status == 'aguardando'
+          && request.resource.data.status in ['ajuste', 'recusada']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'mensagemAnalista', 'analisadoPor', 'analisadoPorNome', 'analisadoEm'])
+          && texto(request.resource.data.mensagemAnalista, 1, 1000) && assinaturaAnalise(request.resource.data))
+        // Analista gera a OC: só junto com a criação da própria OC, na mesma transação.
+        || (analista() && resource.data.status == 'aguardando' && request.resource.data.status == 'gerada'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'ocNumero', 'mensagemAnalista', 'analisadoPor', 'analisadoPorNome', 'analisadoEm'])
+          && request.resource.data.ocNumero is int && assinaturaAnalise(request.resource.data)
+          && !exists(caminho('ocs', string(request.resource.data.ocNumero)))
+          && getAfter(caminho('ocs', string(request.resource.data.ocNumero))).data.solicitacaoId == id);
+      allow delete: if false;
+    }
+
+    match /ocs/{numero} {
+      allow read: if analista() || (ativo() && resource.data.criadoPor == request.auth.uid);
+
+      // Número automático: é o próximo livre do contador, que avança na mesma transação.
+      allow create: if analista()
+        && request.resource.data.keys().hasOnly(['numero', 'dataEmissao', 'status', 'trava', 'tipo', 'sexo', 'raca', 'quantidade', 'origens',
+          'destino', 'proprietario', 'dataPrevista', 'observacao', 'telefone', 'solicitante', 'responsavel',
+          'criadoPor', 'solicitacaoId', 'geradaPor', 'geradaPorNome', 'geradaEm'])
+        && request.resource.data.numero is int && string(request.resource.data.numero) == numero
+        && request.resource.data.numero >= get(caminho('config', 'contador')).data.proxima
+        && getAfter(caminho('config', 'contador')).data.proxima == request.resource.data.numero + 1
+        && request.resource.data.status == 'Pendente' && request.resource.data.trava in ['Sim', 'Não']
+        && request.resource.data.quantidade is int && request.resource.data.quantidade > 0
+        && request.resource.data.origens is list && request.resource.data.origens.size() >= 1 && request.resource.data.origens.size() <= 50
+        && request.resource.data.geradaPor == request.auth.uid && request.resource.data.geradaEm == request.time
+        && getAfter(caminho('solicitacoes', request.resource.data.solicitacaoId)).data.ocNumero == request.resource.data.numero;
+
+      allow update: if analista()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusAtualizadoPor', 'statusAtualizadoPorNome', 'statusAtualizadoEm'])
+        && request.resource.data.status in ['Pendente', 'Aberto', 'Finalizado', 'Cancelado']
+        && request.resource.data.statusAtualizadoPor == request.auth.uid && request.resource.data.statusAtualizadoEm == request.time;
+      allow delete: if false;
+    }
+
+    match /config/contador {
+      allow read: if analista();
+      allow update: if analista()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['proxima'])
+        && request.resource.data.proxima is int && request.resource.data.proxima > resource.data.proxima
+        && !exists(caminho('ocs', string(request.resource.data.proxima - 1)))
+        && existsAfter(caminho('ocs', string(request.resource.data.proxima - 1)));
+      allow create, delete: if false;
+    }
+
+    // Reservadas às Cloud Functions (Admin SDK ignora estas regras).
+    match /auditoriaContas/{id} { allow read: if analista(); allow write: if false; }
+    match /operacoesContas/{id} { allow read, write: if false; }
+  }
+}

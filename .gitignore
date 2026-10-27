@@ -1,0 +1,9 @@
+node_modules
+*-debug.log
+.firebase/
+functions/.env*
+# Planilhas e exportações com dados de OCs não vão para o repositório público
+dados/
+*.xlsx
+*.csv
+.claude/
