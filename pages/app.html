@@ -209,6 +209,19 @@
                 </div>
                 <p id="status-importar" class="ajuda" role="status"></p>
             </section>
+            <section class="card" id="card-corte" data-master hidden>
+                <div class="card-cabecalho">
+                    <div>
+                        <h2 class="card-titulo">Corte pela planilha de OCs</h2>
+                        <p class="card-subtitulo">Escolha a planilha <strong>.xlsx</strong> de OCs (aba <em>Banco de Dados OC</em>). Todas as OCs dela são gravadas como <strong>Finalizadas</strong>, com viabilidade <strong>Concluída</strong>, substituindo as que já existem. OCs do sistema com número depois da última da planilha são apagadas, e a próxima OC passa a ser a seguinte. Só o Master vê esta opção.</p>
+                    </div>
+                </div>
+                <div class="linha">
+                    <input id="arquivo-corte" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+                    <button id="btn-corte" class="btn btn-primario" type="button" disabled>Fazer o corte</button>
+                </div>
+                <p id="status-corte" class="ajuda" role="status"></p>
+            </section>
             <div id="grade-cadastros" class="grade-cadastros"></div>
         </section>
 
