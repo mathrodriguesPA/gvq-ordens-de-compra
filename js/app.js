@@ -5,7 +5,7 @@ import {
 import { auth, db } from "./firebase.js";
 import { TIPOS, SEXOS, PROPRIETARIOS, TRAVAS, STATUS_OC, LISTAS_PADRAO, NOMES_LISTAS, SITUACOES, CLASSE_STATUS_OC, DESCRICAO_STATUS_OC, MASTERS, CANCELAVEL_PELO_SOLICITANTE,
     VIABILIDADES, DESCRICAO_VIABILIDADE, CLASSE_VIABILIDADE, normalizarOc } from "./listas.js";
-import { lerArquivosPlanilha } from "./importar.js";
+import { lerArquivosPlanilha, lerPlanilhaOcs } from "./importar.js";
 import { escapar, formatarData, formatarNumero, formatarPreco, lerNumero, hojeIso, compararNomes, contemTermos } from "./util.js";
 
 const $ = id => document.getElementById(id);
@@ -885,6 +885,91 @@ function montarCadastros() {
         });
     });
     montarImportacao();
+    if (ehMaster()) montarCorte();
+}
+
+// Corte pela planilha de OCs (só Master): regrava todas as OCs da planilha como Finalizadas com
+// viabilidade Concluída, apaga as OCs do sistema com número depois da última da planilha (o pedido
+// delas fica Cancelado), finaliza as que sobraram e faz a próxima OC ser a seguinte à última.
+function montarCorte() {
+    let plano = null;
+    const status = $('status-corte'), botao = $('btn-corte');
+    $('arquivo-corte').addEventListener('change', async e => {
+        plano = null;
+        botao.disabled = true;
+        const arquivo = e.target.files[0];
+        if (!arquivo) return;
+        status.textContent = 'Lendo a planilha...';
+        try {
+            const ocs = await lerPlanilhaOcs(arquivo);
+            if (!ocs.length) { status.textContent = 'Nenhuma OC encontrada na planilha.'; return; }
+            const ultima = Math.max(...ocs.map(o => o.numero));
+            const ids = new Set(ocs.map(o => o.id));
+            const apagar = estado.ocs.filter(o => o.numero > ultima);
+            const finalizar = estado.ocs.filter(o => o.numero <= ultima && !ids.has(o.id) && (o.status !== 'Finalizado' || o.viabilidade !== 'Concluída'));
+            plano = { ocs, ultima, apagar, finalizar };
+            status.textContent = [
+                `${formatarNumero(ocs.length)} OCs na planilha (até a ${ultima}): todas ficam Finalizadas, com viabilidade Concluída.`,
+                apagar.length ? `Serão apagadas do sistema, por virem depois da ${ultima}: ${apagar.map(rotuloOc).join(', ')}.` : '',
+                finalizar.length ? `Outras ${finalizar.length} OCs do sistema também serão finalizadas.` : '',
+                `Próxima OC: ${ultima + 1}.`
+            ].filter(Boolean).join(' ');
+            botao.disabled = false;
+        } catch (error) {
+            console.error(error);
+            status.textContent = error.message || 'Não foi possível ler a planilha.';
+        }
+    });
+    botao.onclick = async () => {
+        if (!plano) return;
+        const { ocs, ultima, apagar, finalizar } = plano;
+        if (!confirm(`Fazer o corte com ${ocs.length} OCs da planilha?\n\nTodas ficam Finalizadas e com viabilidade Concluída`
+            + (apagar.length ? `; as OCs ${apagar.map(rotuloOc).join(', ')} serão apagadas` : '')
+            + `; a próxima OC será a ${ultima + 1}.\n\nNão dá para desfazer.`)) return;
+        botao.disabled = true;
+        const assinatura = { importadaPor: estado.usuario.login, importadaEm: serverTimestamp() };
+        try {
+            for (let i = 0; i < ocs.length; i += 200) {
+                const lote = writeBatch(db);
+                for (const { id, ...oc } of ocs.slice(i, i + 200)) {
+                    lote.set(doc(db, 'ocs', id), { fonte: 'planilha', ...oc, status: 'Finalizado', viabilidade: 'Concluída', ...assinatura });
+                }
+                await lote.commit();
+                status.textContent = `Gravando... ${Math.min(i + 200, ocs.length)} de ${ocs.length} OCs.`;
+            }
+            if (apagar.length) {
+                const lote = writeBatch(db);
+                for (const oc of apagar) {
+                    lote.delete(doc(db, 'ocs', oc.id));
+                    const sol = oc.solicitacaoId ? (await getDoc(doc(db, 'solicitacoes', oc.solicitacaoId))).data() : null;
+                    if (sol?.status === 'gerada' && sol.ocNumero === oc.numero) {
+                        lote.update(doc(db, 'solicitacoes', oc.solicitacaoId), {
+                            status: 'cancelada', ocNumero: deleteField(), mensagemAnalista: `OC ${oc.numero} apagada no corte da planilha.`, ...assinaturaAnalise()
+                        });
+                    }
+                }
+                await lote.commit();
+            }
+            for (let i = 0; i < finalizar.length; i += 200) {
+                const lote = writeBatch(db);
+                for (const oc of finalizar.slice(i, i + 200)) {
+                    lote.update(doc(db, 'ocs', oc.id), {
+                        status: 'Finalizado', viabilidade: 'Concluída',
+                        statusAtualizadoPor: estado.usuario.login, statusAtualizadoPorNome: estado.usuario.nome, statusAtualizadoEm: serverTimestamp()
+                    });
+                }
+                await lote.commit();
+            }
+            await updateDoc(doc(db, 'config', 'contador'), { proxima: ultima + 1, liberados: [] });
+            status.textContent = `Pronto: ${ocs.length} OCs finalizadas${apagar.length ? `, ${apagar.length} apagadas` : ''}. A próxima OC será a ${ultima + 1}.`;
+            plano = null;
+            $('arquivo-corte').value = '';
+        } catch (error) {
+            console.error(error);
+            status.textContent = 'O corte parou no meio. Escolha a planilha de novo e repita: o que já foi gravado é regravado igual.';
+            botao.disabled = false;
+        }
+    };
 }
 
 function montarImportacao() {
