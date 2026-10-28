@@ -513,7 +513,7 @@ $('btn-gerar-oc').onclick = () => comBloqueio(async () => {
         return n;
     });
     $('dialogo-analise').close();
-    abrirModeloOc({ numero, tipo: s.tipo, sexo: s.sexo, raca: s.raca, quantidade, origens, destino: s.destino, dataPrevista: s.dataPrevista },
+    abrirModeloOc({ numero, tipo: s.tipo, sexo: s.sexo, raca: s.raca, quantidade, origens, destino: s.destino, dataPrevista: s.dataPrevista, dataEmissao: hojeIso() },
         `OC ${numero} gerada: Em Andamento, com viabilidade Pendente.`);
 });
 
@@ -630,84 +630,210 @@ async function excluirOc(oc) {
 }
 
 // ---------------------------------------------------------------------------
-// Modelo da OC para visualizar e mandar por e-mail (mesmo layout da planilha de OCs).
-// O HTML usa tabela e estilos inline para colar no Outlook/Gmail sem perder a formatação.
+// Modelo da OC: desenhado num canvas e exportado como imagem PNG, que vai igual para
+// qualquer e-mail (colar com Ctrl+V), WhatsApp ou PDF.
 // ---------------------------------------------------------------------------
 const TITULOS_OC = { Compra: 'Ordem de Compra', 'Transferência': 'Ordem de Transferência', Trading: 'Ordem de Trading' };
-let ocAberta = null;
+const CORES_OC = { indigo: '#12004F', verde: '#00A651', texto: '#1F1D2B', suave: '#6E6A85', linha: '#E7E4F5', destaque: '#F4F2FB' };
+let ocAberta = null, imagemOc = null, logoOc = null;
 
 function camposModeloOc(oc) {
     const data = dataOc(oc) || '';
-    const mes = /^\d{4}-\d{2}/.test(data) ? new Date(`${data.slice(0, 7)}-15T12:00:00`).toLocaleDateString('pt-BR', { month: 'long' }) : '';
-    return [
-        ['Número da OC', rotuloOc(oc)],
-        // Em Compra a origem é sempre "Compra": o modelo da compra não tem essa linha.
-        ...(oc.tipo === 'Compra' ? [] : [['Fazenda Origem', textoOrigens(oc)]]),
-        ['Fazenda Destino', oc.destino],
-        ['Mês da OC', mes.charAt(0).toUpperCase() + mes.slice(1)],
-        ['Sexo', oc.sexo],
-        ['Raça', oc.raca],
-        ['Quantidade', oc.quantidade ? `${formatarNumero(oc.quantidade)} cb` : '']
-    ];
+    const mes = /^\d{4}-\d{2}/.test(data) ? new Date(`${data.slice(0, 7)}-15T12:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) : '';
+    return {
+        titulo: TITULOS_OC[oc.tipo] || 'Ordem de Compra',
+        numero: rotuloOc(oc),
+        mes: mes.charAt(0).toUpperCase() + mes.slice(1),
+        linhas: [
+            // Em Compra a origem é sempre "Compra": o modelo da compra não tem essa linha.
+            ...(oc.tipo === 'Compra' ? [] : [['Fazenda de origem', textoOrigens(oc)]]),
+            ['Fazenda de destino', oc.destino],
+            ['Sexo', oc.sexo],
+            ['Raça', oc.raca],
+            ['Quantidade', oc.quantidade ? `${formatarNumero(oc.quantidade)} cabeças` : '']
+        ]
+    };
 }
 
-function htmlModeloOc(oc) {
-    const logo = new URL('../assets/img/logo-gvq.png', location.href).href;
-    const titulo = TITULOS_OC[oc.tipo] || 'Ordem de Compra';
-    const linha = 'border-bottom:1px solid #BFBFBF;padding:3px 6px;';
-    return `<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:340px;font-family:Calibri,Arial,sans-serif;font-size:15px;color:#000;background:#fff">
-        <tr><td colspan="2" style="padding:0 0 4px"><img src="${logo}" alt="GVQ" width="120" style="display:block;width:120px;height:auto;border:0"></td></tr>
-        <tr><td colspan="2" style="padding:2px 6px;border-bottom:2px solid #12004F;font-size:20px;font-weight:bold;font-style:italic;color:#12004F">${escapar(titulo)}</td></tr>
-        ${camposModeloOc(oc).map(([rotulo, valor]) => `<tr>
-            <td style="${linha}font-weight:bold;font-style:italic;white-space:nowrap">${escapar(rotulo)}</td>
-            <td style="${linha}padding-left:18px">${escapar(valor || '—')}</td></tr>`).join('')}
-    </table>`;
-}
-
-const textoModeloOc = oc => [TITULOS_OC[oc.tipo] || 'Ordem de Compra', ...camposModeloOc(oc).map(([r, v]) => `${r}: ${v || '—'}`)].join('\n');
+const textoModeloOc = oc => {
+    const c = camposModeloOc(oc);
+    return [c.titulo, `Número da OC: ${c.numero}`, `Mês da OC: ${c.mes || '—'}`, ...c.linhas.map(([r, v]) => `${r}: ${v || '—'}`)].join('\n');
+};
 const assuntoModeloOc = oc => `${TITULOS_OC[oc.tipo] || 'Ordem de Compra'} ${rotuloOc(oc)} - ${oc.destino || ''}`.trim();
+const carregarLogoOc = () => logoOc ??= new Promise((ok, erro) => {
+    const img = new Image();
+    img.onload = () => ok(img);
+    img.onerror = erro;
+    img.src = '../assets/img/logo-gvq.png';
+});
 
-function abrirModeloOc(oc, aviso = '') {
+function quebrarTexto(ctx, texto, largura) {
+    const linhas = [];
+    let atual = '';
+    for (const palavra of String(texto).split(' ')) {
+        const tentativa = atual ? `${atual} ${palavra}` : palavra;
+        if (atual && ctx.measureText(tentativa).width > largura) { linhas.push(atual); atual = palavra; }
+        else atual = tentativa;
+    }
+    return [...linhas, atual];
+}
+
+function retangulo(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+}
+
+// Desenha em 2x para a imagem ficar nítida; devolve o canvas.
+async function desenharModeloOc(oc) {
+    await Promise.all(['800 26px Montserrat', '700 30px Montserrat', '600 16px Inter', '400 13px Inter'].map(f => document.fonts.load(f))).catch(() => {});
+    const logo = await carregarLogoOc().catch(() => null);
+    const c = camposModeloOc(oc);
+    const L = 600, M = 36, X_VALOR = 210, ESCALA = 2;
+    const fonteRotulo = '400 14px Inter, Arial, sans-serif', fonteValor = '600 16px Inter, Arial, sans-serif';
+
+    const medir = document.createElement('canvas').getContext('2d');
+    medir.font = fonteValor;
+    const linhas = c.linhas.map(([rotulo, valor]) => ({ rotulo, valor: quebrarTexto(medir, valor || '—', L - M - X_VALOR) }));
+    const yLinhas = 262;
+    const altura = yLinhas + linhas.reduce((t, l) => t + 24 + 22 * l.valor.length, 0) + 50;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = L * ESCALA;
+    canvas.height = altura * ESCALA;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(ESCALA, ESCALA);
+    ctx.textBaseline = 'alphabetic';
+
+    // Cartão branco com borda suave e faixa verde no topo
+    ctx.fillStyle = '#fff';
+    retangulo(ctx, 0.5, 0.5, L - 1, altura - 1, 18);
+    ctx.fill();
+    ctx.strokeStyle = CORES_OC.linha;
+    ctx.stroke();
+    ctx.save();
+    retangulo(ctx, 0.5, 0.5, L - 1, altura - 1, 18);
+    ctx.clip();
+    ctx.fillStyle = CORES_OC.verde;
+    ctx.fillRect(0, 0, L, 8);
+    ctx.restore();
+
+    // Logo e etiqueta do tipo
+    if (logo) ctx.drawImage(logo, M, 32, 48 * logo.width / logo.height, 48);
+    const etiqueta = (oc.tipo || 'Compra').toUpperCase();
+    ctx.font = '700 12px Inter, Arial, sans-serif';
+    const largEtiqueta = ctx.measureText(etiqueta).width + 28;
+    ctx.fillStyle = CORES_OC.destaque;
+    retangulo(ctx, L - M - largEtiqueta, 42, largEtiqueta, 28, 14);
+    ctx.fill();
+    ctx.fillStyle = CORES_OC.indigo;
+    ctx.fillText(etiqueta, L - M - largEtiqueta + 14, 60);
+
+    // Título
+    ctx.font = '800 26px Montserrat, Arial, sans-serif';
+    ctx.fillStyle = CORES_OC.indigo;
+    ctx.fillText(c.titulo, M, 122);
+
+    // Quadro de destaque: número e mês da OC
+    ctx.fillStyle = CORES_OC.destaque;
+    retangulo(ctx, M, 142, L - 2 * M, 88, 14);
+    ctx.fill();
+    ctx.fillStyle = CORES_OC.verde;
+    ctx.fillRect(M, 142, 5, 88);
+    const meio = M + (L - 2 * M) / 2;
+    ctx.font = '600 12px Inter, Arial, sans-serif';
+    ctx.fillStyle = CORES_OC.suave;
+    ctx.fillText('NÚMERO DA OC', M + 24, 172);
+    ctx.fillText('MÊS DA OC', meio + 12, 172);
+    ctx.fillStyle = CORES_OC.indigo;
+    ctx.font = '700 30px Montserrat, Arial, sans-serif';
+    ctx.fillText(c.numero, M + 24, 210);
+    ctx.font = '700 20px Montserrat, Arial, sans-serif';
+    ctx.fillText(c.mes || '—', meio + 12, 207);
+    ctx.fillStyle = CORES_OC.linha;
+    ctx.fillRect(meio - 6, 160, 1, 52);
+
+    // Linhas de dados
+    let y = yLinhas;
+    for (const l of linhas) {
+        ctx.font = fonteRotulo;
+        ctx.fillStyle = CORES_OC.suave;
+        ctx.fillText(l.rotulo, M, y);
+        ctx.font = fonteValor;
+        ctx.fillStyle = CORES_OC.texto;
+        l.valor.forEach((parte, i) => ctx.fillText(parte, X_VALOR, y + 22 * i));
+        y += 22 * (l.valor.length - 1) + 14;
+        ctx.fillStyle = CORES_OC.linha;
+        ctx.fillRect(M, y, L - 2 * M, 1);
+        y += 32;
+    }
+
+    // Rodapé
+    ctx.font = '400 12px Inter, Arial, sans-serif';
+    ctx.fillStyle = CORES_OC.suave;
+    ctx.fillText(oc.dataEmissao ? `Emitida em ${formatarData(oc.dataEmissao)}` : 'Grupo Vilela de Queiroz', M, altura - 28);
+    const marca = 'GVQ · Ordens de Compra';
+    ctx.fillText(marca, L - M - ctx.measureText(marca).width, altura - 28);
+    return canvas;
+}
+
+const pngDoCanvas = canvas => new Promise(ok => canvas.toBlob(ok, 'image/png'));
+
+async function abrirModeloOc(oc, aviso = '') {
     if (!oc) return;
     ocAberta = oc;
-    $('modelo-oc').innerHTML = htmlModeloOc(oc);
+    imagemOc = null;
+    $('modelo-oc').innerHTML = '<p class="texto-suave">Montando o modelo...</p>';
     $('aviso-modelo-oc').textContent = aviso;
-    $('dialogo-oc').showModal();
+    if (!$('dialogo-oc').open) $('dialogo-oc').showModal();
+    const canvas = await desenharModeloOc(oc);
+    imagemOc = { canvas, png: pngDoCanvas(canvas) };
+    $('modelo-oc').innerHTML = `<img src="${canvas.toDataURL('image/png')}" alt="${escapar(textoModeloOc(oc))}">`;
 }
 
-// Copia o modelo formatado (HTML) e, para quem colar em texto puro, a versão em texto.
-async function copiarModeloOc() {
-    const html = htmlModeloOc(ocAberta), texto = textoModeloOc(ocAberta);
+// Copia a imagem (cola como figura no Outlook, Gmail ou WhatsApp Web); sem suporte, copia o texto.
+async function copiarImagemOc() {
     try {
-        await navigator.clipboard.write([new ClipboardItem({
-            'text/html': new Blob([html], { type: 'text/html' }),
-            'text/plain': new Blob([texto], { type: 'text/plain' })
-        })]);
-    } catch {
-        // Navegadores sem ClipboardItem: copia o que está na tela.
-        const faixa = document.createRange();
-        faixa.selectNodeContents($('modelo-oc'));
-        getSelection().removeAllRanges();
-        getSelection().addRange(faixa);
-        document.execCommand('copy');
-        getSelection().removeAllRanges();
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': imagemOc.png })]);
+        return true;
+    } catch (error) {
+        console.error(error);
+        await navigator.clipboard.writeText(textoModeloOc(ocAberta)).catch(() => {});
+        return false;
     }
 }
 
+function baixarImagemOc() {
+    const a = Object.assign(document.createElement('a'), { href: imagemOc.canvas.toDataURL('image/png'), download: `OC-${rotuloOc(ocAberta).replace(/\s+/g, '-')}.png` });
+    a.click();
+}
+
+$('btn-baixar-oc').onclick = () => {
+    if (!imagemOc) return;
+    baixarImagemOc();
+    $('aviso-modelo-oc').textContent = 'Imagem baixada. Anexe ou arraste para o e-mail.';
+};
 $('btn-copiar-oc').onclick = async () => {
-    await copiarModeloOc();
-    $('aviso-modelo-oc').textContent = 'Modelo copiado. Cole (Ctrl+V) no corpo do e-mail.';
+    if (!imagemOc) return;
+    $('aviso-modelo-oc').textContent = await copiarImagemOc()
+        ? 'Imagem copiada. Cole (Ctrl+V) no e-mail ou no WhatsApp.'
+        : 'Este navegador não copia imagens: o texto foi copiado. Use "Baixar imagem" para mandar o modelo.';
 };
 $('btn-email-oc').onclick = async () => {
-    await copiarModeloOc();
-    $('aviso-modelo-oc').textContent = 'Modelo copiado. No e-mail que abriu, cole (Ctrl+V) no corpo e escolha os destinatários.';
-    location.href = `mailto:?subject=${encodeURIComponent(assuntoModeloOc(ocAberta))}`;
+    if (!imagemOc) return;
+    const copiou = await copiarImagemOc();
+    $('aviso-modelo-oc').textContent = copiou
+        ? 'Imagem copiada. No e-mail que abriu, cole (Ctrl+V) no corpo e escolha os destinatários.'
+        : 'Este navegador não copia imagens: use "Baixar imagem" e anexe no e-mail que abriu.';
+    // Com a imagem copiada o corpo vai vazio para colar; sem ela, vai o texto da OC.
+    const corpo = copiou ? '' : `&body=${encodeURIComponent(textoModeloOc(ocAberta))}`;
+    location.href = `mailto:?subject=${encodeURIComponent(assuntoModeloOc(ocAberta))}${corpo}`;
 };
 $('btn-imprimir-oc').onclick = () => {
+    if (!imagemOc) return;
     const janela = window.open('', '_blank');
     if (!janela) { alert('Libere as janelas pop-up deste site para imprimir.'); return; }
     janela.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>${escapar(assuntoModeloOc(ocAberta))}</title></head>
-        <body style="margin:32px">${htmlModeloOc(ocAberta)}</body></html>`);
+        <body style="margin:32px"><img src="${imagemOc.canvas.toDataURL('image/png')}" style="width:600px;max-width:100%"></body></html>`);
     janela.document.close();
     janela.onload = () => janela.print();
 };
