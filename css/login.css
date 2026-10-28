@@ -4,8 +4,6 @@ body { background: #fff; }
 .auth-tela { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 100vh; }
 .auth-foto { position: relative; overflow: hidden; background: var(--verde-800); }   /* cor de fundo enquanto a foto carrega */
 .auth-foto img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 45%; }
-.auth-credito { position: absolute; left: 16px; bottom: 12px; margin: 0; font-size: 11px; color: rgba(255, 255, 255, 0.85); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
-.auth-credito a { color: inherit; }
 @media (max-width: 900px) {
     .auth-tela { grid-template-columns: 1fr; }
     .auth-foto { display: none; }
