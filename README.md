@@ -11,6 +11,7 @@ O site junta os dois sistemas com um login só ([`index.html`](index.html)). Dep
 
 - **Ordens de Compra:** este sistema (`pages/`, `js/`, `css/`), Firebase `gvq-ordens-de-compra`.
 - **Compra de Gado:** parte web do [gvq-sistema-integrado](https://github.com/wiziackmatheeus-sys/gvq-sistema-integrado), copiada para [`compras/`](compras/) (commit `bb98dfd`). Continua no Firebase `gvq-sistema-compras`, como app com o nome `compras`. As regras, as functions e os testes dele continuam no repositório original, que é de onde se publica o backend.
+- **GTA Paraguai:** lê as marcas a fogo nas fotos do rebanho com o Claude e preenche os quadrados da GTA ([`pages/gta.html`](pages/gta.html)). Usa o acesso do Ordens de Compra e uma Cloud Function em [`functions/`](functions/). Veja [docs/GTA-PARAGUAI.md](docs/GTA-PARAGUAI.md).
 - **Login:** o mesmo usuário e senha entram nos dois Firebase ao mesmo tempo. O ambiente em que a pessoa não tem acesso (ou tem outra senha) aparece bloqueado. Na Compra de Gado, ele traz os links para solicitar cadastro ou entrar com outra senha ([`compras/cadastro.html`](compras/cadastro.html)).
 - Voltar ao login (pelo **Sair** de qualquer ambiente) encerra as duas sessões. **Trocar ambiente**, na barra lateral, volta para a escolha.
 

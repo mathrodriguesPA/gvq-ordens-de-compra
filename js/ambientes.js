@@ -56,6 +56,8 @@ else {
     $('amb-nome').textContent = nome ? `, ${nome}` : '';
     montarCartao('amb-ordens', ordens);
     montarCartao('amb-compras', compras);
+    // GTA Paraguai usa o mesmo acesso do Ordens de Compra.
+    montarCartao('amb-gta', ordens.href ? { ...ordens, href: 'gta.html' } : ordens);
     $('amb-carregando').hidden = true;
     $('amb-grade').hidden = false;
 }

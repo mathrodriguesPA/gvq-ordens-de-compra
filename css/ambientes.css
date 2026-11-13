@@ -10,7 +10,7 @@ body { background: var(--cor-fundo); min-height: 100vh; }
 .amb-descricao { margin-top: 6px; color: var(--cor-texto-2); font-size: 15px; }
 .amb-carregando { margin-top: 40px; color: var(--cor-texto-3); }
 
-.amb-grade { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 32px; }
+.amb-grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 20px; margin-top: 32px; }
 .amb-card {
     display: flex; flex-direction: column; gap: 10px; padding: 28px;
     background: var(--cor-superficie); border: 1px solid var(--cor-borda); border-radius: var(--raio-xl); box-shadow: var(--sombra-sm);

@@ -52,6 +52,8 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    if (url.pathname === '/api/ler-marcas' && req.method === 'POST') return lerMarcasLocal(req, res);
+
     let arquivo = path.join(ROOT, decodeURIComponent(url.pathname));
     if (arquivo !== ROOT && !arquivo.startsWith(ROOT + path.sep)) {
         res.writeHead(403).end();
@@ -73,6 +75,27 @@ const server = http.createServer((req, res) => {
         res.end(dados);
     });
 });
+
+// Leitura das marcas da GTA Paraguai (pages/gta.html) sem publicar a Cloud Function.
+// Com ANTHROPIC_API_KEY no ambiente chama o Claude de verdade; sem ela devolve um resultado de exemplo.
+// Precisa de `npm install` na pasta functions/.
+async function lerMarcasLocal(req, res) {
+    const responder = (status, corpo) => res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }).end(JSON.stringify(corpo));
+    try {
+        const partes = [];
+        for await (const parte of req) partes.push(parte);
+        const marcas = await import('../functions/marcas.js');
+        const entrada = marcas.validarEntrada(JSON.parse(Buffer.concat(partes).toString()));
+        if (!process.env.ANTHROPIC_API_KEY) {
+            await new Promise(r => setTimeout(r, 1200));
+            return responder(200, { ...marcas.exemplo(entrada.fotos.length), exemplo: true });
+        }
+        responder(200, await marcas.lerMarcas(entrada, process.env.ANTHROPIC_API_KEY));
+    } catch (error) {
+        console.error(error);
+        responder(error?.constructor?.name === 'ErroEntrada' ? 400 : 500, { erro: error.message || 'Erro ao ler as marcas.' });
+    }
+}
 
 // Junta alterações próximas: se só mudou CSS, atualiza o estilo; senão recarrega.
 let pendente = null;

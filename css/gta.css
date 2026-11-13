@@ -1,0 +1,100 @@
+/* GTA Paraguai (pages/gta.html): fotos, marcas lidas e folha da GTA para imprimir */
+.gta { max-width: 1040px; margin: 0 auto; padding: 8px 24px 64px; }
+.gta .card { padding: 24px; }
+.gta .card-cabecalho { margin-bottom: 18px; }
+
+.gta-soltar {
+    display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 28px 16px; text-align: center; cursor: pointer;
+    border: 2px dashed var(--cor-borda-forte); border-radius: var(--raio-lg); background: var(--cor-superficie-2); color: var(--cor-texto-2);
+    transition: border-color var(--transicao), background var(--transicao);
+}
+.gta-soltar:hover, .gta-soltar.sobre, .gta-soltar:focus-within { border-color: var(--verde-500); background: var(--verde-50); }
+.gta-soltar .icon { color: var(--verde-700); }
+
+.gta-miniaturas { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; margin-top: 14px; }
+.gta-miniaturas:empty { display: none; }
+.gta-mini { position: relative; margin: 0; border-radius: var(--raio); overflow: hidden; border: 1px solid var(--cor-borda); background: var(--cinza-100); }
+.gta-mini img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+.gta-mini figcaption { position: absolute; left: 6px; bottom: 6px; padding: 1px 8px; border-radius: var(--raio-total); font-size: 11px; font-weight: 600; background: rgba(0, 0, 0, 0.6); color: #fff; }
+.gta-mini.lida figcaption { background: var(--verde-700); }
+.gta-mini-remover {
+    position: absolute; top: 4px; right: 4px; display: grid; place-items: center; width: 28px; height: 28px;
+    border: 0; border-radius: 50%; background: rgba(0, 0, 0, 0.6); color: #fff; cursor: pointer;
+}
+.gta-mini-remover:hover { background: var(--perigo-700); }
+
+.gta-erro { color: var(--perigo-700); font-size: 13px; margin-top: 10px; }
+.gta-erro:empty { display: none; }
+.gta-acoes { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.gta-acoes #progresso { margin-right: auto; font-size: 13px; }
+.gta-vazio { padding: 8px 0; }
+
+/* Marcas */
+.gta-marcas { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 14px; }
+.gta-marca { display: flex; gap: 16px; padding: 14px; border: 1px solid var(--cor-borda); border-radius: var(--raio-lg); background: var(--cor-superficie); }
+.gta-marca.duvida { border-color: var(--alerta-100); background: var(--alerta-50); }
+.gta-marca-visual { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+.gta-marca-desenho { position: relative; width: 120px; height: 120px; border: 1.5px solid #222; border-radius: 4px; background: #fff; color: #111; }
+.gta-marca-num { position: absolute; top: 3px; left: 6px; font-size: 11px; font-weight: 700; color: #555; }
+.gta-marca-recorte { width: 120px; height: 90px; object-fit: cover; border-radius: 4px; border: 1px solid var(--cor-borda); }
+.gta-marca-info { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; }
+.gta-marca-info .campo { height: 36px; font-size: 14px; }
+.gta-marca-tags { gap: 6px; }
+
+.gta-marca-svg { display: block; width: 100%; height: 100%; }
+.gta-marca-svg path { fill: none; stroke: currentColor; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; vector-effect: none; }
+
+/* Desenho à mão */
+.gta-dialogo { width: min(400px, calc(100vw - 32px)); padding: 24px; border: 0; border-radius: var(--raio-xl); background: var(--cor-superficie); color: var(--cor-texto); box-shadow: var(--sombra-lg); }
+.gta-dialogo::backdrop { background: rgba(10, 12, 25, 0.55); }
+.gta-tela { width: 100%; aspect-ratio: 1; border: 1.5px solid #222; border-radius: 4px; background: #fff; touch-action: none; cursor: crosshair; }
+.gta-dialogo .gta-acoes { margin-top: 4px; }
+
+/* Folha da GTA: o tamanho segue a largura (container) para a prévia e a impressão saírem iguais */
+.gta-campos { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 18px; }
+.gta-previa-wrap { padding: 16px; border-radius: var(--raio-lg); background: var(--cinza-100); overflow: auto; }
+.gta-folha { container-type: inline-size; position: relative; width: min(100%, 560px); margin: 0 auto; background: #fff; color: #111; box-shadow: var(--sombra-md); font-family: Arial, Helvetica, sans-serif; }
+/* Só os desenhos, na posição do Rubro 2 da GTA de papel: aparece só na impressão "sobre a GTA" */
+.gta-folha-sobre { display: none; position: relative; width: var(--largura); height: var(--altura); color: #000; }
+.gta-quadro-modelo { position: absolute; padding: 1.2%; }
+.gta-ajuda-sobre { margin-top: 14px; }
+
+.gta-folha.grade { padding: 7cqw 7cqw; }
+.gta-folha-cabecalho { display: flex; flex-direction: column; align-items: center; gap: 0.6cqw; padding-bottom: 2.4cqw; border-bottom: 0.3cqw solid #111; }
+.gta-folha-cabecalho strong { font-size: 3cqw; letter-spacing: 0.04em; text-align: center; }
+.gta-folha-cabecalho span { font-size: 2cqw; text-align: center; }
+.gta-folha-dados { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2cqw 3cqw; margin: 3cqw 0; font-size: 2.3cqw; }
+.gta-folha-dados span { border-bottom: 0.2cqw solid #999; padding-bottom: 0.6cqw; min-height: 3.4cqw; }
+.gta-folha-dados span:last-child { grid-column: 1 / -1; }
+.gta-rubro2-titulos { display: grid; grid-template-columns: 1fr 2fr; border: 0.3cqw solid #111; border-bottom: 0; font-size: 2.3cqw; font-weight: 700; text-align: center; }
+.gta-rubro2-titulos span { padding: 0.8cqw; }
+.gta-rubro2-titulos span + span { border-left: 0.3cqw solid #111; }
+.gta-folha-grade { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 0.3cqw solid #111; border-left: 0.3cqw solid #111; }
+.gta-quadro { position: relative; aspect-ratio: 1; border-right: 0.3cqw solid #111; border-bottom: 0.3cqw solid #111; padding: 2.4cqw; }
+.gta-quadro-num { position: absolute; top: 0.6cqw; left: 1cqw; font-size: 1.7cqw; font-weight: 700; color: #444; }
+.gta-quadro-local { position: absolute; left: 0; right: 0; bottom: 0.5cqw; text-align: center; font-size: 1.5cqw; color: #444; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 1cqw; }
+
+@media (max-width: 720px) {
+    .gta { padding: 4px 16px 48px; }
+    .gta .card { padding: 18px; }
+    .gta-campos { grid-template-columns: minmax(0, 1fr); }
+    .gta-marca { flex-direction: column; }
+    .gta-marca-visual { flex-direction: row; }
+    .gta-acoes .btn-lg { width: 100%; }
+}
+@media (max-width: 480px) {
+    .gta-topo .amb-acoes .btn span { display: none; }
+}
+
+/* Impressão: só a folha. O tamanho da página (A4 ou ofício) vem de imprimir() em js/gta.js.
+   "Sobre a GTA" (body.sobre-gta) troca a folha anexa pelos desenhos posicionados no Rubro 2. */
+@media print {
+    body { background: #fff !important; }
+    body > :not(main), .gta > #carregando, #conteudo > :not(section:last-of-type), .gta-dialogo { display: none !important; }
+    #conteudo > section:last-of-type > :not(.gta-previa-wrap, .gta-folha-sobre) { display: none !important; }
+    .gta, #conteudo, #conteudo > section:last-of-type, .gta-previa-wrap { all: unset; display: block; }
+    .gta-folha { width: 210mm; margin: 0; box-shadow: none; }
+    .gta-folha, .gta-folha *, .gta-folha-sobre * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body.sobre-gta .gta-previa-wrap { display: none !important; }
+    body.sobre-gta .gta-folha-sobre { display: block; }
+}
